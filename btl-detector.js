@@ -1,6 +1,62 @@
 // BTL Detection based on GeoJSON polygon maps
+import L from 'https://esm.sh/leaflet@1.9.4';
+import { getData } from './database.js';
+
+// Fix Leaflet's default icon path issues with CDN
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
 
 let btlPolygons = null;
+let map = null;
+let marker = null;
+let currentPolygonLayer = null;
+
+function updateMap(lat, lon) {
+    const mapDiv = document.getElementById('btlMap');
+    if (!mapDiv) return;
+
+    mapDiv.style.display = 'block';
+
+    if (!map) {
+        map = L.map('btlMap').setView([lat, lon], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+    } else {
+        map.setView([lat, lon], 15);
+        map.invalidateSize();
+    }
+
+    if (marker) {
+        marker.setLatLng([lat, lon]);
+    } else {
+        marker = L.marker([lat, lon]).addTo(map);
+    }
+}
+
+function updateMapPolygon(geojson) {
+    if (!map) return;
+
+    if (currentPolygonLayer) {
+        map.removeLayer(currentPolygonLayer);
+        currentPolygonLayer = null;
+    }
+
+    if (geojson) {
+        currentPolygonLayer = L.geoJSON(geojson, {
+            style: {
+                color: '#3388ff',
+                weight: 2,
+                opacity: 0.6,
+                fillOpacity: 0.1
+            }
+        }).addTo(map);
+    }
+}
 
 // GeoJSON file mapping for each BTL - Using unique files from assets
 export const BTL_FILES = {
@@ -47,6 +103,45 @@ export const BTL_FILES = {
     '48º BPM/M': '48.BPM_M.geojson',
     '49º BPM/M': '49.BPM_M.geojson'
 };
+
+async function findHistoricalBTL(rua, numero, municipio) {
+    if (!rua || !numero) return null;
+    
+    try {
+        const atendimentos = await getData('atendimentos');
+        if (!atendimentos) return null;
+
+        const ruaSearch = rua.toUpperCase().trim();
+        const numeroSearch = numero.toUpperCase().trim();
+        const municipioSearch = municipio ? municipio.toUpperCase().trim() : '';
+
+        // Sort occurrences by date descending to find most recent
+        const entries = Object.values(atendimentos).sort((a, b) => b.timestamp - a.timestamp);
+
+        for (const atendimento of entries) {
+            if (!atendimento.rua || !atendimento.numero || !atendimento.btl) continue;
+            
+            const r = atendimento.rua.toUpperCase().trim();
+            const n = atendimento.numero.toUpperCase().trim();
+            
+            if (r === ruaSearch && n === numeroSearch) {
+                // If municipio is present in both, verify match
+                if (municipioSearch && atendimento.municipio) {
+                    if (atendimento.municipio.toUpperCase().trim() === municipioSearch) {
+                        return atendimento.btl;
+                    }
+                } else {
+                    // Weak match (no municipality check) - accept if just street/num matched
+                    return atendimento.btl;
+                }
+            }
+        }
+        return null;
+    } catch (error) {
+        console.error('Error finding historical BTL:', error);
+        return null;
+    }
+}
 
 async function loadBTLPolygons() {
     if (btlPolygons) return btlPolygons;
@@ -125,6 +220,9 @@ function checkPointInGeoJSON(lat, lon, geojson) {
 export async function detectBTLFromAddress(rua, numero, municipio, estado) {
     const btlSelect = document.getElementById('btl');
     const btlStatus = document.getElementById('btlStatus');
+    const btlMap = document.getElementById('btlMap');
+
+    if (btlMap) btlMap.style.display = 'none'; // Reset visibility at start of detection
 
     if (!btlStatus) return;
 
@@ -132,8 +230,23 @@ export async function detectBTLFromAddress(rua, numero, municipio, estado) {
     btlStatus.style.color = '#666';
 
     try {
-        // Geocode the address
-        const address = `${rua}, ${numero}, ${municipio}, ${estado}, Brasil`;
+        // 1. Check Historical Data First
+        const historicalBTL = await findHistoricalBTL(rua, numero, municipio);
+        
+        if (historicalBTL) {
+            btlSelect.value = historicalBTL;
+            btlStatus.textContent = `BTL Histórico: ${historicalBTL}`;
+            btlStatus.style.color = '#1976d2';
+        }
+
+        // 2. Geocode the address (for map and backup detection)
+        let address;
+        if (numero) {
+            address = `${rua}, ${numero}, ${municipio}, ${estado}, Brasil`;
+        } else {
+            address = `${rua}, ${municipio}, ${estado}, Brasil`;
+        }
+
         const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
 
         const response = await fetch(geocodeUrl, {
@@ -145,40 +258,64 @@ export async function detectBTLFromAddress(rua, numero, municipio, estado) {
         const results = await response.json();
 
         if (results.length === 0) {
-            btlStatus.textContent = 'Endereço não encontrado';
-            btlStatus.style.color = '#ff9800';
+            if (!historicalBTL) {
+                btlStatus.textContent = 'Endereço não encontrado no mapa';
+                btlStatus.style.color = '#ff9800';
+            }
             return;
         }
 
         const lat = parseFloat(results[0].lat);
         const lon = parseFloat(results[0].lon);
 
+        updateMap(lat, lon);
+
         // Load BTL polygons
         const polygons = await loadBTLPolygons();
 
         if (!polygons) {
-            btlStatus.textContent = 'Erro ao carregar mapas';
-            btlStatus.style.color = '#d32f2f';
+            if (!historicalBTL) {
+                btlStatus.textContent = 'Erro ao carregar mapas';
+                btlStatus.style.color = '#d32f2f';
+            }
             return;
         }
 
         // Check which BTL the point falls into
-        let detectedBTL = null;
-
+        let mapBTL = null;
         for (const [btl, geojson] of Object.entries(polygons)) {
             if (checkPointInGeoJSON(lat, lon, geojson)) {
-                detectedBTL = btl;
+                mapBTL = btl;
                 break;
             }
         }
 
-        if (detectedBTL) {
-            btlSelect.value = detectedBTL;
-            btlStatus.textContent = ` BTL detectado: ${detectedBTL}`;
-            btlStatus.style.color = '#388e3c';
+        // Decision logic: Historical takes precedence over Map if available
+        let finalBTL = historicalBTL || mapBTL;
+
+        if (finalBTL) {
+            btlSelect.value = finalBTL;
+            
+            if (historicalBTL) {
+                btlStatus.textContent = `BTL Histórico: ${historicalBTL}`;
+                btlStatus.style.color = '#1976d2';
+            } else {
+                btlStatus.textContent = `BTL Detectado: ${mapBTL}`;
+                btlStatus.style.color = '#388e3c';
+            }
+            
+            // Show polygon for the selected BTL (whether historical or map)
+            if (polygons[finalBTL]) {
+                updateMapPolygon(polygons[finalBTL]);
+            }
         } else {
             btlStatus.textContent = 'BTL não identificado automaticamente';
             btlStatus.style.color = '#ff9800';
+            
+            if (currentPolygonLayer && map) {
+                map.removeLayer(currentPolygonLayer);
+                currentPolygonLayer = null;
+            }
         }
 
     } catch (error) {

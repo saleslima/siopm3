@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cadastro</title>
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 </head>
 <body>
     <div class="container">
@@ -367,6 +368,7 @@
                             <option value="49º BPM/M">49º BPM/M</option>
                         </select>
                         <div id="btlStatus" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
+                        <div id="btlMap" style="height: 250px; width: 100%; margin-top: 10px; display: none; border-radius: 4px; border: 1px solid #ddd; z-index: 1;"></div>
                     </div>
                     <div class="form-group">
                         <label for="referencia">Referência</label>

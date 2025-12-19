@@ -231,14 +231,12 @@ cepInput.addEventListener('blur', async (e) => {
                 
                 // Try to detect BTL after CEP fills address
                 const numero = document.getElementById('numero').value.trim();
-                if (numero) {
-                    await detectBTLFromAddress(
-                        data.logradouro.toUpperCase(),
-                        numero,
-                        data.localidade.toUpperCase(),
-                        data.uf.toUpperCase()
-                    );
-                }
+                await detectBTLFromAddress(
+                    data.logradouro.toUpperCase(),
+                    numero || '',
+                    data.localidade.toUpperCase(),
+                    data.uf.toUpperCase()
+                );
             } else {
                 showMessage(attendanceMessage, 'CEP não encontrado.', 'error');
             }
