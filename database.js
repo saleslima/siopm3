@@ -1,4 +1,4 @@
-import { getDatabase, ref, push, get, remove, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getDatabase, ref, push, get, remove, update, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
 let db;
 
@@ -27,7 +27,11 @@ export async function updateData(path, data) {
     return await update(ref(db, path), data);
 }
 
-export { update };
+export async function setData(path, data) {
+    return await set(ref(db, path), data);
+}
+
+export { update, set };
 
 export async function getNextSequentialNumber(today) {
     try {

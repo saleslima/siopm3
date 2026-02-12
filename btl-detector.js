@@ -1,64 +1,41 @@
-// BTL Detection based on GeoJSON polygon maps
-import L from 'https://esm.sh/leaflet@1.9.4';
+/* BTL Detection based on GeoJSON and KML polygon maps (uses free Nominatim geocoding) */
 import { getData } from './database.js';
 
-// Fix Leaflet's default icon path issues with CDN
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
 let btlPolygons = null;
-let map = null;
-let marker = null;
-let currentPolygonLayer = null;
 
-function updateMap(lat, lon) {
+function updateMapWithIframe(lat, lon) {
     const mapDiv = document.getElementById('btlMap');
     if (!mapDiv) return;
 
     mapDiv.style.display = 'block';
-
-    if (!map) {
-        map = L.map('btlMap').setView([lat, lon], 15);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
-    } else {
-        map.setView([lat, lon], 15);
-        map.invalidateSize();
+    
+    // Create iframe + overlay once
+    if (!document.getElementById('btlMapIframe')) {
+        mapDiv.innerHTML = '';
+        
+        const iframe = document.createElement('iframe');
+        iframe.width = '100%';
+        iframe.height = '100%';
+        iframe.style.border = '0';
+        iframe.id = 'btlMapIframe';
+        mapDiv.appendChild(iframe);
+        
+        const overlay = document.createElement('div');
+        overlay.className = 'map-overlay-container';
+        overlay.innerHTML = `
+            <div class="map-marker-overlay">
+                <div class="pin-icon"></div>
+                <div class="pin-pulse"></div>
+            </div>
+        `;
+        mapDiv.appendChild(overlay);
     }
-
-    if (marker) {
-        marker.setLatLng([lat, lon]);
-    } else {
-        marker = L.marker([lat, lon]).addTo(map);
-    }
+    
+    const iframe = document.getElementById('btlMapIframe');
+    iframe.src = `https://www.google.com/maps/d/embed?mid=1IZQYhjM25zcrjnTEByfibpcDAE59r9o&ll=${lat},${lon}&z=14`;
 }
 
-function updateMapPolygon(geojson) {
-    if (!map) return;
-
-    if (currentPolygonLayer) {
-        map.removeLayer(currentPolygonLayer);
-        currentPolygonLayer = null;
-    }
-
-    if (geojson) {
-        currentPolygonLayer = L.geoJSON(geojson, {
-            style: {
-                color: '#3388ff',
-                weight: 2,
-                opacity: 0.6,
-                fillOpacity: 0.1
-            }
-        }).addTo(map);
-    }
-}
-
-// GeoJSON file mapping for each BTL - Using unique files from assets
+/* Map of BTL -> primary local filename (usually geojson). We'll try geojson first, then attempt a same-base KML file if geojson missing. */
 export const BTL_FILES = {
     '01º BPM/M': '1.BPM_M (3).geojson',
     '02º BPM/M': '2.BPM_M (3).geojson',
@@ -104,6 +81,7 @@ export const BTL_FILES = {
     '49º BPM/M': '49.BPM_M.geojson'
 };
 
+/* Search recent attendances for historical BTL by exact rua+numero (fast fallback) */
 async function findHistoricalBTL(rua, numero, municipio) {
     if (!rua || !numero) return null;
     
@@ -115,7 +93,6 @@ async function findHistoricalBTL(rua, numero, municipio) {
         const numeroSearch = numero.toUpperCase().trim();
         const municipioSearch = municipio ? municipio.toUpperCase().trim() : '';
 
-        // Sort occurrences by date descending to find most recent
         const entries = Object.values(atendimentos).sort((a, b) => b.timestamp - a.timestamp);
 
         for (const atendimento of entries) {
@@ -125,13 +102,11 @@ async function findHistoricalBTL(rua, numero, municipio) {
             const n = atendimento.numero.toUpperCase().trim();
             
             if (r === ruaSearch && n === numeroSearch) {
-                // If municipio is present in both, verify match
                 if (municipioSearch && atendimento.municipio) {
                     if (atendimento.municipio.toUpperCase().trim() === municipioSearch) {
                         return atendimento.btl;
                     }
                 } else {
-                    // Weak match (no municipality check) - accept if just street/num matched
                     return atendimento.btl;
                 }
             }
@@ -143,32 +118,151 @@ async function findHistoricalBTL(rua, numero, municipio) {
     }
 }
 
+/* Attempt to load GeoJSON or fallback to parsing a KML with same base name */
+async function tryLoadFileAsGeoJSON(baseFilename) {
+    // Try exact filename first (geojson)
+    try {
+        const res = await fetch(`/${baseFilename}`);
+        if (res.ok) {
+            const json = await res.json();
+            // basic validation
+            if (json && json.type === 'FeatureCollection') return json;
+        }
+    } catch (err) {
+        // continue to kml attempt
+    }
+
+    // Attempt to find same-base KML (replace extension with .kml)
+    const base = baseFilename.replace(/\.[^.]+$/, '');
+    const kmlCandidates = [
+        `${base}.kml`,
+        `${base}.KML`
+    ];
+
+    for (const kmlName of kmlCandidates) {
+        try {
+            const r = await fetch(`/${kmlName}`);
+            if (r.ok) {
+                const text = await r.text();
+                const geojson = parseKMLtoGeoJSON(text);
+                if (geojson) return geojson;
+            }
+        } catch (err) {
+            // ignore and try next
+        }
+    }
+
+    // Not found
+    return null;
+}
+
+/* Minimal KML -> GeoJSON parser: extracts Polygon and MultiGeometry coordinates from <coordinates> tags.
+   Builds a FeatureCollection with Polygon/MultiPolygon features. */
+function parseKMLtoGeoJSON(kmlText) {
+    if (!kmlText) return null;
+    try {
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(kmlText, 'text/xml');
+        if (!xml) return null;
+
+        const placemarks = Array.from(xml.getElementsByTagName('Placemark'));
+        const features = [];
+
+        placemarks.forEach(pm => {
+            // find any <coordinates> nodes inside this placemark
+            const coordNodes = Array.from(pm.getElementsByTagName('coordinates'));
+            const polygons = [];
+
+            coordNodes.forEach(node => {
+                const coordsText = node.textContent.trim();
+                if (!coordsText) return;
+
+                // coordinates may be separated by whitespace; each coord is lon,lat[,alt]
+                const rawCoords = coordsText.split(/\s+/).map(s => s.trim()).filter(Boolean);
+                const ring = rawCoords.map(item => {
+                    const parts = item.split(',').map(p => p.trim());
+                    const lon = parseFloat(parts[0]);
+                    const lat = parseFloat(parts[1]);
+                    return [lon, lat];
+                }).filter(c => !Number.isNaN(c[0]) && !Number.isNaN(c[1]));
+
+                if (ring.length > 0) {
+                    polygons.push(ring);
+                }
+            });
+
+            if (polygons.length === 0) return;
+
+            // If there's more than one polygon set, treat as MultiPolygon
+            if (polygons.length === 1) {
+                features.push({
+                    type: 'Feature',
+                    geometry: {
+                        type: 'Polygon',
+                        coordinates: [polygons[0]]
+                    },
+                    properties: {}
+                });
+            } else {
+                // MultiPolygon expects array of polygons, each polygon is array of rings
+                const mp = polygons.map(ring => [ring]);
+                features.push({
+                    type: 'Feature',
+                    geometry: {
+                        type: 'MultiPolygon',
+                        coordinates: mp
+                    },
+                    properties: {}
+                });
+            }
+        });
+
+        if (features.length === 0) return null;
+
+        return {
+            type: 'FeatureCollection',
+            features
+        };
+    } catch (err) {
+        console.warn('KML parse error', err);
+        return null;
+    }
+}
+
 async function loadBTLPolygons() {
     if (btlPolygons) return btlPolygons;
 
     try {
-        console.log('\n=== ARQUIVOS GEOJSON USADOS NO CÓDIGO ===\n');
-        console.log('📁 ARQUIVOS GEOJSON (usados em btl-detector.js para detecção automática de BTL):\n');
-        Object.entries(BTL_FILES).forEach(([btl, filename]) => {
-            console.log(`  ✓ ${btl}: ${filename}`);
-        });
-        console.log(`\n📊 Total de arquivos GeoJSON em uso: ${Object.keys(BTL_FILES).length}`);
-        console.log('\n================================================\n');
+        // Try remote maps in Firebase first
+        const mapasRemote = await getData('mapas');
+        
+        if (mapasRemote) {
+            btlPolygons = {};
+            Object.values(mapasRemote).forEach(item => {
+                if (item.id && item.geojson) {
+                    btlPolygons[item.id] = item.geojson;
+                }
+            });
+            if (Object.keys(btlPolygons).length > 0) return btlPolygons;
+        }
 
+        // Fallback: local files
         btlPolygons = {};
 
-        for (const [btl, filename] of Object.entries(BTL_FILES)) {
+        const entries = Object.entries(BTL_FILES);
+        // load in parallel (but not too many at once could be heavy; keep simple)
+        await Promise.all(entries.map(async ([btl, filename]) => {
             try {
-                const response = await fetch(`/${filename}`);
-                if (response.ok) {
-                    btlPolygons[btl] = await response.json();
+                const geojson = await tryLoadFileAsGeoJSON(filename);
+                if (geojson) {
+                    btlPolygons[btl] = geojson;
                 } else {
-                    console.warn(`Could not load ${filename}`);
+                    console.warn(`No geo data for ${btl} (${filename})`);
                 }
             } catch (err) {
-                console.warn(`Error loading ${filename}:`, err);
+                console.warn('Error loading', filename, err);
             }
-        }
+        }));
 
         return btlPolygons;
     } catch (error) {
@@ -177,6 +271,7 @@ async function loadBTLPolygons() {
     }
 }
 
+/* Ray-casting point-in-polygon */
 function pointInPolygon(point, polygon) {
     const [x, y] = point;
     let inside = false;
@@ -193,10 +288,12 @@ function pointInPolygon(point, polygon) {
     return inside;
 }
 
+/* Check lat/lon against GeoJSON features (Polygon / MultiPolygon) */
 function checkPointInGeoJSON(lat, lon, geojson) {
     if (!geojson || !geojson.features) return false;
 
     for (const feature of geojson.features) {
+        if (!feature.geometry) continue;
         if (feature.geometry.type === 'Polygon') {
             for (const ring of feature.geometry.coordinates) {
                 if (pointInPolygon([lon, lat], ring)) {
@@ -217,12 +314,45 @@ function checkPointInGeoJSON(lat, lon, geojson) {
     return false;
 }
 
+export async function preloadMaps() {
+    // Start background load
+    loadBTLPolygons().catch(err => console.error('Error preloading maps:', err));
+}
+
+/* Free geocoding via Nominatim (OpenStreetMap) */
+async function geocodeAddressNominatim(address) {
+    try {
+        const params = new URLSearchParams({
+            q: address,
+            format: 'jsonv2',
+            addressdetails: 0,
+            limit: 1
+        });
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+            headers: { 'Accept-Language': 'pt-BR' },
+            // Nominatim requires a sensible user agent in some environments; browsers are fine.
+        });
+        if (!res.ok) throw new Error('Nominatim geocode failed');
+        const results = await res.json();
+        if (Array.isArray(results) && results.length > 0) {
+            const r = results[0];
+            return { lat: parseFloat(r.lat), lon: parseFloat(r.lon) };
+        }
+        return null;
+    } catch (err) {
+        console.warn('Geocode error (Nominatim):', err);
+        return null;
+    }
+}
+
 export async function detectBTLFromAddress(rua, numero, municipio, estado) {
     const btlSelect = document.getElementById('btl');
     const btlStatus = document.getElementById('btlStatus');
+    const btlCoordinates = document.getElementById('btlCoordinates');
     const btlMap = document.getElementById('btlMap');
 
-    if (btlMap) btlMap.style.display = 'none'; // Reset visibility at start of detection
+    if (btlMap) btlMap.style.display = 'none';
+    if (btlCoordinates) btlCoordinates.textContent = '';
 
     if (!btlStatus) return;
 
@@ -230,48 +360,40 @@ export async function detectBTLFromAddress(rua, numero, municipio, estado) {
     btlStatus.style.color = '#666';
 
     try {
-        // 1. Check Historical Data First
-        const historicalBTL = await findHistoricalBTL(rua, numero, municipio);
-        
+        let address;
+        if (numero) {
+            address = `${rua}, ${numero}, ${municipio || ''}, ${estado || ''}, Brasil`.replace(/\s+,/g, ',').trim();
+        } else {
+            address = `${rua}, ${municipio || ''}, ${estado || ''}, Brasil`.replace(/\s+,/g, ',').trim();
+        }
+
+        const [historicalBTL, geocodeResult, polygons] = await Promise.all([
+            findHistoricalBTL(rua, numero, municipio),
+            geocodeAddressNominatim(address).catch(() => null),
+            loadBTLPolygons()
+        ]);
+
         if (historicalBTL) {
             btlSelect.value = historicalBTL;
-            btlStatus.textContent = `BTL Histórico: ${historicalBTL}`;
+            btlStatus.textContent = `✓ BTL: ${historicalBTL}`;
             btlStatus.style.color = '#1976d2';
         }
 
-        // 2. Geocode the address (for map and backup detection)
-        let address;
-        if (numero) {
-            address = `${rua}, ${numero}, ${municipio}, ${estado}, Brasil`;
-        } else {
-            address = `${rua}, ${municipio}, ${estado}, Brasil`;
-        }
-
-        const geocodeUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`;
-
-        const response = await fetch(geocodeUrl, {
-            headers: {
-                'User-Agent': 'COPOM-APP'
-            }
-        });
-
-        const results = await response.json();
-
-        if (results.length === 0) {
+        if (!geocodeResult) {
             if (!historicalBTL) {
-                btlStatus.textContent = 'Endereço não encontrado no mapa';
+                btlStatus.textContent = 'Endereço não localizado';
                 btlStatus.style.color = '#ff9800';
             }
             return;
         }
 
-        const lat = parseFloat(results[0].lat);
-        const lon = parseFloat(results[0].lon);
+        const { lat, lon } = geocodeResult;
 
-        updateMap(lat, lon);
+        if (btlCoordinates) {
+            btlCoordinates.textContent = `📍 Lat: ${lat.toFixed(6)}, Long: ${lon.toFixed(6)}`;
+        }
 
-        // Load BTL polygons
-        const polygons = await loadBTLPolygons();
+        updateMapWithIframe(lat, lon);
 
         if (!polygons) {
             if (!historicalBTL) {
@@ -281,7 +403,6 @@ export async function detectBTLFromAddress(rua, numero, municipio, estado) {
             return;
         }
 
-        // Check which BTL the point falls into
         let mapBTL = null;
         for (const [btl, geojson] of Object.entries(polygons)) {
             if (checkPointInGeoJSON(lat, lon, geojson)) {
@@ -290,32 +411,20 @@ export async function detectBTLFromAddress(rua, numero, municipio, estado) {
             }
         }
 
-        // Decision logic: Historical takes precedence over Map if available
-        let finalBTL = historicalBTL || mapBTL;
+        const finalBTL = mapBTL || historicalBTL;
 
         if (finalBTL) {
             btlSelect.value = finalBTL;
-            
-            if (historicalBTL) {
-                btlStatus.textContent = `BTL Histórico: ${historicalBTL}`;
-                btlStatus.style.color = '#1976d2';
-            } else {
-                btlStatus.textContent = `BTL Detectado: ${mapBTL}`;
+            if (mapBTL) {
+                btlStatus.textContent = `✓ BTL: ${mapBTL} (Geo-referenciado)`;
                 btlStatus.style.color = '#388e3c';
-            }
-            
-            // Show polygon for the selected BTL (whether historical or map)
-            if (polygons[finalBTL]) {
-                updateMapPolygon(polygons[finalBTL]);
+            } else if (historicalBTL) {
+                btlStatus.textContent = `✓ BTL: ${historicalBTL} (Histórico)`;
+                btlStatus.style.color = '#1976d2';
             }
         } else {
-            btlStatus.textContent = 'BTL não identificado automaticamente';
+            btlStatus.textContent = 'BTL não identificado nas coordenadas';
             btlStatus.style.color = '#ff9800';
-            
-            if (currentPolygonLayer && map) {
-                map.removeLayer(currentPolygonLayer);
-                currentPolygonLayer = null;
-            }
         }
 
     } catch (error) {

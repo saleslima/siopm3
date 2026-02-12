@@ -35,37 +35,104 @@ export async function loadVTRPanels(btlNumber) {
             vtrDisponiveisContent.innerHTML = html;
         }
 
-        const empenhadasForBTL = Object.entries(vtrAssignments).filter(([key, assignment]) => {
-            const vtrPrefix = assignment.vtrNumber.substring(0, 2);
-            return vtrPrefix === btlPrefix;
+        // Group assignments by VTR number so each VTR appears only once
+        const empenhadasForBTL = Object.entries(vtrAssignments)
+            .filter(([key, assignment]) => {
+                const vtrPrefix = assignment.vtrNumber.substring(0, 2);
+                return vtrPrefix === btlPrefix;
+            });
+
+        const groupedByVTR = {};
+        empenhadasForBTL.forEach(([assignKey, assignment]) => {
+            const vtrNum = assignment.vtrNumber;
+            if (!groupedByVTR[vtrNum]) groupedByVTR[vtrNum] = [];
+            const ocorrencia = atendimentos[assignment.ocorrenciaId];
+            if (ocorrencia) {
+                groupedByVTR[vtrNum].push({
+                    assignKey,
+                    ocorrenciaKey: assignment.ocorrenciaId,
+                    ocorrencia
+                });
+            }
         });
 
         const vtrEmpenhadasContent = document.getElementById('vtrEmpenhadasContent');
-        if (empenhadasForBTL.length === 0) {
+        const vtrIds = Object.keys(groupedByVTR).sort();
+
+        if (vtrIds.length === 0) {
             vtrEmpenhadasContent.innerHTML = '<p class="no-vtrs">Nenhuma VTR empenhada</p>';
         } else {
             let html = '<div class="vtr-list">';
-            empenhadasForBTL.forEach(([key, assignment]) => {
-                const ocorrencia = atendimentos[assignment.ocorrenciaId];
-                if (ocorrencia) {
-                    html += `
-                        <div class="vtr-item" data-vtr="${assignment.vtrNumber}" data-ocorrencia-key="${assignment.ocorrenciaId}">
-                            <div class="vtr-number">VTR ${assignment.vtrNumber}</div>
-                            <div class="vtr-occurrence">#${ocorrencia.numeroRegistro}</div>
-                            <div class="vtr-gravidade gravidade-${ocorrencia.gravidade.toLowerCase()}">${ocorrencia.gravidade}</div>
+            vtrIds.forEach(vtrNum => {
+                const list = groupedByVTR[vtrNum];
+                const exampleOcc = list[0].ocorrencia;
+                const gravidadeClass = exampleOcc ? `gravidade-${exampleOcc.gravidade.toLowerCase()}` : '';
+                html += `
+                    <div class="vtr-item" data-vtr="${vtrNum}" style="display: flex; align-items: center; justify-content: space-between; padding: 12px;">
+                        <div>
+                            <div class="vtr-number" style="font-weight:600">VTR ${vtrNum}</div>
+                            <div class="vtr-occurrence" style="font-size:13px; color:#666;">${list.length} ocorrência(s) atribuída(s)</div>
                         </div>
-                    `;
-                }
+                        <div style="display:flex; flex-direction:column; align-items:flex-end; gap:6px;">
+                            <div class="${gravidadeClass}" style="font-size:12px;">${exampleOcc ? exampleOcc.gravidade : ''}</div>
+                            <button class="btn-secondary btn-vtr-open" data-vtr="${vtrNum}" style="padding:6px 10px; font-size:13px;">Ver Ocorrências</button>
+                        </div>
+                    </div>
+                `;
             });
             html += '</div>';
             vtrEmpenhadasContent.innerHTML = html;
 
-            document.querySelectorAll('.vtr-item').forEach(item => {
-                item.addEventListener('dblclick', async () => {
-                    const ocorrenciaKey = item.getAttribute('data-ocorrencia-key');
-                    const vtrNumber = item.getAttribute('data-vtr');
-                    const { showVTROcorrenciaDetails } = await import('./vtr-occurrence-modal.js');
-                    showVTROcorrenciaDetails(ocorrenciaKey, atendimentos[ocorrenciaKey], vtrNumber);
+            // Attach handler: when user clicks "Ver Ocorrências" show a selection of occurrences for that VTR
+            document.querySelectorAll('.btn-vtr-open').forEach(btn => {
+                btn.addEventListener('click', async (ev) => {
+                    const vtrNumber = btn.getAttribute('data-vtr');
+                    const list = groupedByVTR[vtrNumber] || [];
+                    if (list.length === 0) return;
+
+                    // Build modal content listing occurrences for this VTR
+                    const modal = document.getElementById('ocorrenciaModal');
+                    const modalContent = document.getElementById('ocorrenciaModalContent');
+
+                    let html = `<h2>VTR ${vtrNumber} — Ocorrências (${list.length})</h2><div style="display:flex;flex-direction:column;gap:10px;">`;
+                    list.forEach(item => {
+                        const o = item.ocorrencia;
+                        html += `
+                            <div style="padding:10px; background:#fff; border:1px solid #ddd; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <div style="font-weight:700;">#${o.numeroRegistro} — ${o.rua}, ${o.numero} - ${o.bairro}</div>
+                                    <div style="font-size:13px; color:#666;">${o.dataHora} — ${o.natureza}</div>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:6px;">
+                                    <button class="btn-cadastro btn-open-occ" data-key="${item.ocorrenciaKey}">Abrir</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += `<div style="margin-top:12px;"><button id="btnCloseVtrList" class="btn-secondary" style="width:100%;">Fechar</button></div></div>`;
+
+                    modalContent.innerHTML = html;
+                    modal.style.display = 'block';
+
+                    // Attach handlers for each "Abrir" button to open the detailed VTR occurrence modal
+                    modalContent.querySelectorAll('.btn-open-occ').forEach(openBtn => {
+                        openBtn.addEventListener('click', async () => {
+                            const ocorrenciaKey = openBtn.getAttribute('data-key');
+                            const ocorrencia = atendimentos[ocorrenciaKey];
+                            modal.style.display = 'none';
+                            const { showVTROcorrenciaDetails } = await import('./vtr-occurrence-modal.js');
+                            showVTROcorrenciaDetails(ocorrenciaKey, ocorrencia, vtrNumber);
+                        });
+                    });
+
+                    // close button
+                    const closeBtn = document.getElementById('btnCloseVtrList');
+                    if (closeBtn) {
+                        closeBtn.addEventListener('click', () => {
+                            modal.style.display = 'none';
+                        });
+                    }
+
                 });
             });
         }

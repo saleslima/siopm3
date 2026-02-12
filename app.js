@@ -1,4 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { firebaseConfig } from './firebase-config.js';
 import { initDatabase, pushData, getData, getRef, update } from './database.js';
 import { 
     setCurrentUser, 
@@ -32,18 +33,8 @@ import { setupOcorrenciasSearch } from './search.js';
 import { setupTelefoneHandler, checkByAddress } from './telefone-handler.js';
 import { setupFormHandlers } from './form-handlers.js';
 import { showUserDashboard, showDispatcherScreen, showSupervisorScreen } from './ui-screens.js';
-import { detectBTLFromAddress } from './btl-detector.js';
-
-const firebaseConfig = {
-  apiKey: "AIzaSyAsPjA0R4ee9GAMLmqbHDPg15gh44sVAgM",
-  authDomain: "copomoff-e0add.firebaseapp.com",
-  databaseURL: "https://copomoff-e0add-default-rtdb.firebaseio.com",
-  projectId: "copomoff-e0add",
-  storageBucket: "copomoff-e0add.firebasestorage.app",
-  messagingSenderId: "606132177403",
-  appId: "1:606132177403:web:24e7c0485ece7bcd44235e",
-  measurementId: "G-SR6NZRH2VB"
-};
+import { detectBTLFromAddress, preloadMaps } from './btl-detector.js';
+import { setupAdminHandlers } from './admin.js';
 
 const app = initializeApp(firebaseConfig);
 initDatabase(app);
@@ -56,8 +47,20 @@ const cadastroScreen = document.getElementById('cadastroScreen');
 const userDashboard = document.getElementById('userDashboard');
 const attendanceScreen = document.getElementById('attendanceScreen');
 const dispatcherScreen = document.getElementById('dispatcherScreen');
+const adminPasswordScreen = document.getElementById('adminPasswordScreen');
+const adminScreen = document.getElementById('adminScreen');
 
-export const allScreens = [loginScreen, cadastroPasswordScreen, userLoginScreen, cadastroScreen, userDashboard, attendanceScreen, dispatcherScreen];
+export const allScreens = [
+    loginScreen, 
+    cadastroPasswordScreen, 
+    userLoginScreen, 
+    cadastroScreen, 
+    userDashboard, 
+    attendanceScreen, 
+    dispatcherScreen,
+    adminPasswordScreen,
+    adminScreen
+];
 
 // Button elements
 const btnCadastro = document.getElementById('btnCadastro');
@@ -88,6 +91,7 @@ const militarFields = document.getElementById('militarFields');
 // Check for existing session on page load
 window.addEventListener('DOMContentLoaded', async () => {
     await restoreSession(allScreens);
+    preloadMaps(); // Start loading BTL maps in background
 });
 
 // Button event listeners
@@ -209,7 +213,7 @@ document.getElementById('cpf').addEventListener('input', (e) => {
     e.target.value = formatCPF(e.target.value);
 });
 
-// CEP mask and auto-fill
+ // CEP mask and auto-fill
 const cepInput = document.getElementById('cep');
 cepInput.addEventListener('input', (e) => {
     e.target.value = formatCEP(e.target.value);
@@ -246,6 +250,181 @@ cepInput.addEventListener('blur', async (e) => {
     }
 });
 
+// When user types a street and no CEP, offer matching street options (Nominatim)
+const ruaInput = document.getElementById('rua');
+let ruaSuggestionsBox = null;
+let ruaSuggestionTimeout = null;
+
+function createRuaSuggestionsBox() {
+    if (ruaSuggestionsBox) return;
+    ruaSuggestionsBox = document.createElement('div');
+    ruaSuggestionsBox.id = 'ruaSuggestionsBox';
+    ruaSuggestionsBox.style.cssText = 'position: absolute; background: white; border: 1px solid #ddd; border-radius: 4px; max-height: 200px; overflow-y: auto; z-index: 200; width: calc(100% - 40px); box-shadow: 0 6px 20px rgba(0,0,0,0.08);';
+    const parent = ruaInput.parentNode;
+    parent.style.position = 'relative';
+    parent.appendChild(ruaSuggestionsBox);
+    ruaSuggestionsBox.style.display = 'none';
+}
+
+async function fetchStreetCandidates(rua, municipio, estado) {
+    try {
+        const qParts = [rua];
+        if (municipio) qParts.push(municipio);
+        if (estado) qParts.push(estado);
+        qParts.push('Brasil');
+        const params = new URLSearchParams({
+            q: qParts.join(', '),
+            format: 'jsonv2',
+            addressdetails: 1,
+            limit: 10
+        });
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+            headers: { 'Accept-Language': 'pt-BR' }
+        });
+        if (!res.ok) return [];
+        const results = await res.json();
+        // filter to items that look like streets/ways
+        return results.filter(r => r.type && (r.type.includes('way') || r.type.includes('street') || (r.address && (r.address.road || r.address.pedestrian))));
+    } catch (err) {
+        console.warn('Street candidates error', err);
+        return [];
+    }
+}
+
+function showRuaSuggestions(items) {
+    createRuaSuggestionsBox();
+    ruaSuggestionsBox.innerHTML = '';
+    if (!items || items.length === 0) {
+        ruaSuggestionsBox.style.display = 'none';
+        return;
+    }
+
+    items.forEach(item => {
+        const div = document.createElement('div');
+        div.style.cssText = 'padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 14px;';
+        const display = item.display_name || `${item.address.road || item.address.pedestrian || item.address.footway || ''}, ${item.address.city || item.address.town || item.address.village || ''}`.trim();
+        div.textContent = display.toUpperCase();
+        div.addEventListener('click', async () => {
+            // Fill fields from item.address, then fetch cep via ViaCEP by using postcode if available
+            const addr = item.address || {};
+            ruaInput.value = (addr.road || addr.pedestrian || addr.footway || addr.cycleway || addr.footway || addr.neighbourhood || '').toUpperCase();
+            document.getElementById('bairro').value = (addr.suburb || addr.neighbourhood || addr.village || addr.city_district || addr.district || addr.county || '').toUpperCase();
+            document.getElementById('municipio').value = (addr.city || addr.town || addr.village || addr.county || '').toUpperCase();
+            document.getElementById('estado').value = (addr.state || addr.region || '').toUpperCase();
+
+            // If Nominatim provides postcode, try ViaCEP
+            const postcode = addr.postcode || item.extratags && item.extratags.postcode;
+            if (postcode && /^\d{5}-?\d{3}$/.test(postcode)) {
+                const cepClean = postcode.replace(/\D/g, '');
+                try {
+                    const response = await fetch(`https://viacep.com.br/ws/${cepClean}/json/`);
+                    const data = await response.json();
+                    if (!data.erro) {
+                        document.getElementById('cep').value = formatCEP(data.cep || cepClean);
+                        document.getElementById('rua').value = (data.logradouro || ruaInput.value).toUpperCase();
+                        document.getElementById('bairro').value = (data.bairro || document.getElementById('bairro').value).toUpperCase();
+                        document.getElementById('municipio').value = (data.localidade || document.getElementById('municipio').value).toUpperCase();
+                        document.getElementById('estado').value = (data.uf || document.getElementById('estado').value).toUpperCase();
+                        // run BTL detection with filled data
+                        const numero = document.getElementById('numero').value.trim();
+                        await detectBTLFromAddress(document.getElementById('rua').value, numero || '', document.getElementById('municipio').value, document.getElementById('estado').value);
+                    }
+                } catch (err) {
+                    console.warn('ViaCEP from postcode failed', err);
+                }
+            } else {
+                // No postcode: still attempt detect BTL by geocode coordinates
+                if (item.lat && item.lon) {
+                    // reverse geocode lat/lon to obtain precise data via Nominatim (lookup)
+                    try {
+                        const rev = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${item.lat}&lon=${item.lon}`, {
+                            headers: { 'Accept-Language': 'pt-BR' }
+                        });
+                        if (rev.ok) {
+                            const info = await rev.json();
+                            const addr2 = info.address || {};
+                            document.getElementById('bairro').value = (addr2.suburb || addr2.neighbourhood || addr2.city_district || document.getElementById('bairro').value).toUpperCase();
+                            document.getElementById('municipio').value = (addr2.city || addr2.town || addr2.village || addr2.county || document.getElementById('municipio').value).toUpperCase();
+                            document.getElementById('estado').value = (addr2.state || addr2.region || document.getElementById('estado').value).toUpperCase();
+                        }
+                        // run BTL detection
+                        const numero = document.getElementById('numero').value.trim();
+                        await detectBTLFromAddress(document.getElementById('rua').value, numero || '', document.getElementById('municipio').value, document.getElementById('estado').value);
+                    } catch (e) {
+                        console.warn('Reverse lookup failed', e);
+                    }
+                }
+            }
+
+            ruaSuggestionsBox.style.display = 'none';
+        });
+        ruaSuggestionsBox.appendChild(div);
+    });
+
+    ruaSuggestionsBox.style.display = 'block';
+}
+
+ruaInput.addEventListener('input', (e) => {
+    // hide suggestions as user types; will fetch on blur
+    if (ruaSuggestionsBox) ruaSuggestionsBox.style.display = 'none';
+});
+
+ruaInput.addEventListener('blur', (e) => {
+    // small delay so click on suggestion registers
+    ruaSuggestionTimeout = setTimeout(async () => {
+        const ruaVal = ruaInput.value.trim();
+        const cepVal = document.getElementById('cep').value.replace(/\D/g, '');
+        const municipio = document.getElementById('municipio').value.trim();
+        const estado = document.getElementById('estado').value.trim();
+
+        if (!ruaVal) {
+            if (ruaSuggestionsBox) ruaSuggestionsBox.style.display = 'none';
+            return;
+        }
+
+        // If CEP already filled, let CEP handler handle everything
+        if (cepVal && cepVal.length === 8) return;
+
+        // Query Nominatim for candidate streets when no CEP provided
+        const candidates = await fetchStreetCandidates(ruaVal, municipio, estado);
+        if (candidates.length > 0) {
+            showRuaSuggestions(candidates);
+        } else {
+            if (ruaSuggestionsBox) ruaSuggestionsBox.style.display = 'none';
+            // As fallback, attempt a single geocode to display coords and detect BTL
+            const geocode = await (async () => {
+                try {
+                    const params = new URLSearchParams({
+                        q: `${ruaVal}${municipio ? ', ' + municipio : ''}${estado ? ', ' + estado : ''}, Brasil`,
+                        format: 'jsonv2',
+                        limit: 1
+                    });
+                    const r = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, { headers: { 'Accept-Language': 'pt-BR' } });
+                    if (!r.ok) return null;
+                    const res = await r.json();
+                    return res && res[0] ? { lat: parseFloat(res[0].lat), lon: parseFloat(res[0].lon) } : null;
+                } catch {
+                    return null;
+                }
+            })();
+
+            if (geocode) {
+                document.getElementById('btlCoordinates').textContent = `📍 Lat: ${geocode.lat.toFixed(6)}, Long: ${geocode.lon.toFixed(6)}`;
+                updateMapWithIframe(geocode.lat, geocode.lon);
+                await detectBTLFromAddress(ruaVal, document.getElementById('numero').value.trim(), municipio.toUpperCase(), estado.toUpperCase());
+            }
+        }
+    }, 150);
+});
+
+// hide suggestions on focus elsewhere/click outside
+window.addEventListener('click', (ev) => {
+    if (!ruaSuggestionsBox) return;
+    if (ev.target === ruaInput) return;
+    if (ruaSuggestionsBox.contains(ev.target)) return;
+    ruaSuggestionsBox.style.display = 'none';
+});
+
 // Add address field handlers to check for existing occurrences
 const numeroInput = document.getElementById('numero');
 const bairroInput = document.getElementById('bairro');
@@ -257,13 +436,14 @@ numeroInput.addEventListener('blur', async () => {
     const municipio = document.getElementById('municipio').value.trim();
     const estado = document.getElementById('estado').value.trim();
     
+    // Check for existing occurrences (phone/duplicates alert)
     if (rua && numero && bairro) {
         await checkByAddress(rua, numero, bairro);
-        
-        // Try to detect BTL
-        if (municipio && estado) {
-            await detectBTLFromAddress(rua, numero, municipio, estado);
-        }
+    }
+
+    // Try to detect BTL from address using GeoJSON files
+    if (rua && numero && municipio && estado) {
+        await detectBTLFromAddress(rua, numero, municipio, estado);
     }
 });
 
@@ -283,6 +463,45 @@ setupAutoUppercase([document.getElementById('historico')]);
 setupFormHandlers(allScreens);
 setupOcorrenciasSearch();
 setupTelefoneHandler();
+setupAdminHandlers(allScreens);
+
+// Load naturezas dropdown on page load
+loadNaturezasDropdown();
+
+async function loadNaturezasDropdown() {
+    const naturezaSelect = document.getElementById('natureza');
+    if (!naturezaSelect) return;
+    
+    try {
+        const naturezas = await getData('naturezas');
+        
+        naturezaSelect.innerHTML = '<option value="">Selecione...</option>';
+        
+        if (naturezas && naturezas.length > 0) {
+            naturezas.forEach(nat => {
+                const option = document.createElement('option');
+                option.value = nat.valor;
+                option.textContent = nat.valor;
+                naturezaSelect.appendChild(option);
+            });
+        } else {
+            // Fallback to default naturezas from constants
+            const defaultNaturezas = [
+                'C04 - DESINTELIGÊNCIA',
+                'A98 - VIOLÊNCIA DOMÉSTICA',
+                'B04 - ROUBO'
+            ];
+            defaultNaturezas.forEach(nat => {
+                const option = document.createElement('option');
+                option.value = nat;
+                option.textContent = nat;
+                naturezaSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading naturezas:', error);
+    }
+}
 
 // Cadastro form submission
 form.addEventListener('submit', async (e) => {

@@ -290,6 +290,38 @@ function setupVTRModalHandlers(key, ocorrencia, vtrNumber, modal) {
         const modalContent = document.getElementById('ocorrenciaModalContent');
         const currentHTML = modalContent.innerHTML;
 
+        // Load naturezas and status finais from database
+        const naturezas = await getData('naturezas') || [];
+        const statusFinais = await getData('statusFinais') || [];
+
+        let naturezasOptions = '<option value="">Selecione...</option>';
+        if (naturezas.length > 0) {
+            naturezas.forEach(nat => {
+                naturezasOptions += `<option value="${nat.valor}">${nat.valor}</option>`;
+            });
+        } else {
+            // Fallback
+            naturezasOptions += `
+                <option value="C04 - DESINTELIGÊNCIA">C04 - DESINTELIGÊNCIA</option>
+                <option value="A98 - VIOLÊNCIA DOMÉSTICA">A98 - VIOLÊNCIA DOMÉSTICA</option>
+                <option value="B04 - ROUBO">B04 - ROUBO</option>
+            `;
+        }
+
+        let statusFinaisOptions = '<option value="">Selecione...</option>';
+        if (statusFinais.length > 0) {
+            statusFinais.forEach(status => {
+                statusFinaisOptions += `<option value="${status}">${status}</option>`;
+            });
+        } else {
+            // Fallback
+            statusFinaisOptions += `
+                <option value="NADA CONSTATADO">NADA CONSTATADO</option>
+                <option value="NADA MAIS HAVIA">NADA MAIS HAVIA</option>
+                <option value="PARTES ORIENTADAS">PARTES ORIENTADAS</option>
+            `;
+        }
+
         modalContent.innerHTML = `
             <h2>Encerrar Ocorrência #${ocorrencia.numeroRegistro}</h2>
             <div style="margin: 20px 0;">
@@ -300,10 +332,13 @@ function setupVTRModalHandlers(key, ocorrencia, vtrNumber, modal) {
                 <div style="margin-bottom: 15px;">
                     <label style="display: block; margin-bottom: 5px; font-weight: 600;">Natureza Final</label>
                     <select id="naturezaFinalInput" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
-                        <option value="">Selecione...</option>
-                        <option value="C04 - DESINTELIGÊNCIA">C04 - DESINTELIGÊNCIA</option>
-                        <option value="A98 - VIOLÊNCIA DOMÉSTICA">A98 - VIOLÊNCIA DOMÉSTICA</option>
-                        <option value="B04 - ROUBO">B04 - ROUBO</option>
+                        ${naturezasOptions}
+                    </select>
+                </div>
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 600;">Status Final</label>
+                    <select id="statusFinalInput" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        ${statusFinaisOptions}
                     </select>
                 </div>
                 <button id="btnConfirmarEncerramento" class="btn-cadastro" style="width: 100%; margin-bottom: 10px;">Confirmar Encerramento</button>
@@ -326,6 +361,7 @@ function setupVTRModalHandlers(key, ocorrencia, vtrNumber, modal) {
         document.getElementById('btnConfirmarEncerramento').addEventListener('click', async () => {
             const historicoFinal = document.getElementById('historicoFinalInput').value.trim();
             const naturezaFinal = document.getElementById('naturezaFinalInput').value;
+            const statusFinal = document.getElementById('statusFinalInput').value;
 
             if (!historicoFinal) {
                 alert('Por favor, preencha o histórico final');
@@ -337,12 +373,18 @@ function setupVTRModalHandlers(key, ocorrencia, vtrNumber, modal) {
                 return;
             }
 
+            if (!statusFinal) {
+                alert('Por favor, selecione o status final');
+                return;
+            }
+
             try {
                 const atendimentoRef = getRef(`atendimentos/${key}`);
                 await update(atendimentoRef, {
                     encerrado: true,
                     historicoFinal: historicoFinal,
                     naturezaFinal: naturezaFinal,
+                    statusFinal: statusFinal,
                     resultado: 'ENCERRADO',
                     dataHoraEncerramento: new Date().toLocaleString('pt-BR')
                 });

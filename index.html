@@ -5,7 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cadastro</title>
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAsPjA0R4ee9GAMLmqbHDPg15gh44sVAgM&libraries=geometry" async defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -14,9 +16,106 @@
             <img src="LOGO.PNG" alt="COPOM Logo" class="copom-logo">
             <h1>COPOM OFF</h1>
             <div class="button-group-main">
+                <button id="btnAdmin" class="btn-main-large">🛡️ Admin</button>
                 <button id="btnCadastro" class="btn-main-large">📋 Cadastro</button>
                 <button id="btnUsuario" class="btn-main-large">👤 Usuário</button>
             </div>
+        </div>
+
+        <!-- Password Screen for Admin -->
+        <div id="adminPasswordScreen" style="display: none;">
+            <img src="LOGO.PNG" alt="COPOM Logo" class="copom-logo">
+            <h1>Acesso Admin</h1>
+            <form id="adminPasswordForm">
+                <div class="form-group">
+                    <label for="adminPassword">Senha</label>
+                    <input type="password" id="adminPassword" placeholder="Senha Administrativa" required>
+                </div>
+                <button type="submit" class="btn-cadastro">Entrar</button>
+                <button type="button" id="btnBackFromAdminPassword" class="btn-secondary">Voltar</button>
+            </form>
+            <div id="adminPasswordMessage" class="message"></div>
+        </div>
+
+        <!-- Admin Dashboard -->
+        <div id="adminScreen" style="display: none;">
+            <img src="LOGO.PNG" alt="COPOM Logo" class="copom-logo">
+            <h1>Administração</h1>
+            <div style="background: #fafafa; padding: 20px; border-radius: 8px; border: 1px solid #ddd; max-width: 600px; margin: 0 auto;">
+                <h3>Gerar Relatório de Ocorrências</h3>
+                
+                <div class="form-group">
+                    <label>Período</label>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 5px;">Data Inicial</label>
+                            <input type="datetime-local" id="adminDataInicio" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="font-size: 12px; display: block; margin-bottom: 5px;">Data Final</label>
+                            <input type="datetime-local" id="adminDataFim" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="adminStatusFilter">Status das Ocorrências</label>
+                    <select id="adminStatusFilter" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <option value="TODAS">TODAS (Encerradas e Pendentes)</option>
+                        <option value="ENCERRADAS">APENAS ENCERRADAS</option>
+                        <option value="PENDENTES">APENAS GERADAS (Pendentes/Em Atendimento)</option>
+                    </select>
+                </div>
+
+                <button id="btnGerarRelatorioAdmin" class="btn-cadastro" style="width: 100%; margin-top: 10px;">📄 Gerar PDF</button>
+                
+                <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    <h3>Gestão de Mapas</h3>
+                    <p style="font-size: 12px; color: #666; margin-bottom: 10px;">Sincronize os arquivos GeoJSON locais com o banco de dados Firebase para permitir carregamento dinâmico.</p>
+                    <button id="btnSyncMapas" class="btn-secondary" style="width: 100%;">☁️ Sincronizar Mapas (Upload)</button>
+                    <div id="syncStatus" style="font-size: 12px; margin-top: 5px; color: #666; font-weight: 600;"></div>
+                </div>
+
+                <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    <h3>Gestão de Naturezas</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" id="novaNaturezaCodigo" placeholder="Código (ex: C04)" style="flex: 0 0 100px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <input type="text" id="novaNaturezaDescricao" placeholder="Descrição" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <button id="btnAdicionarNatureza" class="btn-cadastro" style="padding: 10px 20px;">Adicionar</button>
+                    </div>
+                    <div id="listaNaturezas" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: white;"></div>
+                </div>
+
+                <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    <h3>Gestão de Status Finais</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+                        <input type="text" id="novoStatusFinal" placeholder="Novo Status Final" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        <button id="btnAdicionarStatusFinal" class="btn-cadastro" style="padding: 10px 20px;">Adicionar</button>
+                    </div>
+                    <div id="listaStatusFinais" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 10px; background: white;"></div>
+                </div>
+
+                <div style="margin-top: 20px; border-top: 1px solid #ddd; padding-top: 20px;">
+                    <h3>Gráfico de Naturezas Finais por BTL</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 12px;">Data Inicial</label>
+                            <input type="datetime-local" id="chartDataInicio" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-size: 12px;">Data Final</label>
+                            <input type="datetime-local" id="chartDataFim" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                        </div>
+                    </div>
+                    <button id="btnGerarGrafico" class="btn-cadastro" style="width: 100%; margin-bottom: 10px;">📊 Gerar Gráfico</button>
+                    <div id="chartContainer" style="background: white; padding: 20px; border: 1px solid #ddd; border-radius: 4px; min-height: 400px;">
+                        <p style="text-align: center; color: #999;">Clique em "Gerar Gráfico" para visualizar os dados</p>
+                    </div>
+                </div>
+
+                <button id="btnBackFromAdmin" class="btn-secondary" style="width: 100%; margin-top: 10px;">Voltar</button>
+            </div>
+            <div id="adminMessage" class="message"></div>
         </div>
 
         <!-- Password Screen for Cadastro -->
@@ -26,7 +125,7 @@
             <form id="cadastroPasswordForm">
                 <div class="form-group">
                     <label for="cadastroPassword">Senha</label>
-                    <input type="password" id="cadastroPassword" required>
+                    <input type="password" id="cadastroPassword" placeholder="Dica: DAQTA" required>
                 </div>
                 <button type="submit" class="btn-cadastro">Entrar</button>
                 <button type="button" id="btnBackFromCadastroPassword" class="btn-secondary">Voltar</button>
@@ -367,6 +466,7 @@
                             <option value="48º BPM/M">48º BPM/M</option>
                             <option value="49º BPM/M">49º BPM/M</option>
                         </select>
+                        <div id="btlCoordinates" style="margin-top: 5px; font-size: 12px; color: #1976d2; font-weight: 600;"></div>
                         <div id="btlStatus" style="margin-top: 5px; font-size: 12px; color: #666;"></div>
                         <div id="btlMap" style="height: 250px; width: 100%; margin-top: 10px; display: none; border-radius: 4px; border: 1px solid #ddd; z-index: 1;"></div>
                     </div>

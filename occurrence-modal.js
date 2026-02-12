@@ -29,9 +29,21 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
         })
         .sort((a, b) => a[1].vtrNumber.localeCompare(b[1].vtrNumber));
 
+    const busyVTRs = Object.entries(vtrsDisponiveis)
+        .filter(([key, vtr]) => {
+            if (!assignedVTRNumbers.has(vtr.vtrNumber)) return false;
+
+            const vtrPrefix = vtr.vtrNumber.substring(0, 2);
+            return vtrPrefix === btlPrefix;
+        })
+        .sort((a, b) => a[1].vtrNumber.localeCompare(b[1].vtrNumber));
+
     let vtrOptionsHTML = '<option value="">Selecione uma VTR...</option>';
     availableVTRs.forEach(([key, vtr]) => {
         vtrOptionsHTML += `<option value="${vtr.vtrNumber}">${vtr.vtrNumber}</option>`;
+    });
+    busyVTRs.forEach(([key, vtr]) => {
+        vtrOptionsHTML += `<option value="${vtr.vtrNumber}" style="color: #d32f2f; font-weight: 600;">${vtr.vtrNumber} (EMPENHADA)</option>`;
     });
 
     let veiculosHTML = '';
@@ -121,6 +133,7 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
                     ${vtrOptionsHTML}
                 </select>
                 <button id="btnConfirmarVTR" class="btn-cadastro">Confirmar</button>
+                <button id="btnAbortarOcorrencia" class="btn-secondary" style="width: 100%; margin-top: 10px; background-color: #ff9800; color: white;">Abortar Ocorrência</button>
                 <button id="btnSolicitarApoio" class="btn-secondary" style="width: 100%; margin-top: 10px;">Solicitar Apoio</button>
                 <button id="btnRedirecionar" class="btn-secondary" style="width: 100%; margin-top: 10px;">Redirecionar</button>
             </div>
@@ -149,6 +162,13 @@ function setupOcorrenciaModalHandlers(key, ocorrencia, modal, isSOP) {
     if (btnSolicitarApoio) {
         btnSolicitarApoio.addEventListener('click', async () => {
             await showSolicitarApoioDialog(key, ocorrencia, modal);
+        });
+    }
+
+    const btnAbortarOcorrencia = document.getElementById('btnAbortarOcorrencia');
+    if (btnAbortarOcorrencia) {
+        btnAbortarOcorrencia.addEventListener('click', async () => {
+            await showAbortarDialog(key, ocorrencia, modal);
         });
     }
 
@@ -217,6 +237,17 @@ function setupOcorrenciaModalHandlers(key, ocorrencia, modal, isSOP) {
                     return;
                 }
 
+                // Check if VTR is already assigned
+                const vtrAssignments = await getData('vtrAssignments') || {};
+                const isVTRBusy = Object.values(vtrAssignments).some(v => v.vtrNumber === vtrNumber);
+
+                if (isVTRBusy) {
+                    const confirmAccumulate = confirm(`A VTR ${vtrNumber} já está empenhada em outra ocorrência. Deseja acumular?`);
+                    if (!confirmAccumulate) {
+                        return;
+                    }
+                }
+
                 try {
                     await pushData('vtrAssignments', {
                         vtrNumber: vtrNumber,
@@ -233,6 +264,66 @@ function setupOcorrenciaModalHandlers(key, ocorrencia, modal, isSOP) {
             });
         }
     }
+}
+
+async function showAbortarDialog(key, ocorrencia, modal) {
+    const modalContent = document.getElementById('ocorrenciaModalContent');
+
+    let html = `
+        <h2>Abortar Ocorrência #${ocorrencia.numeroRegistro}</h2>
+        <div class="modal-details">
+            <p><strong>Endereço:</strong> ${ocorrencia.rua}, ${ocorrencia.numero} - ${ocorrencia.bairro}</p>
+            <p><strong>Natureza:</strong> ${ocorrencia.natureza}</p>
+        </div>
+        <div class="vtr-assignment-form">
+            <label for="motivoAbortar">Motivo do Abortamento (obrigatório):</label>
+            <textarea id="motivoAbortar" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; font-family: inherit; font-size: 14px;" required></textarea>
+            <button id="btnConfirmarAbortar" class="btn-cadastro" style="width: 100%; margin-bottom: 10px; background-color: #d32f2f;">Confirmar Abortamento</button>
+            <button id="btnCancelarAbortar" class="btn-secondary" style="width: 100%;">Cancelar</button>
+        </div>
+    `;
+
+    modalContent.innerHTML = html;
+
+    const motivoInput = document.getElementById('motivoAbortar');
+    motivoInput.addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    document.getElementById('btnConfirmarAbortar').addEventListener('click', async () => {
+        const motivo = motivoInput.value.trim();
+
+        if (!motivo) {
+            alert('Por favor, descreva o motivo do abortamento');
+            return;
+        }
+
+        try {
+            const atendimentoRef = getRef(`atendimentos/${key}`);
+            await update(atendimentoRef, {
+                encerrado: true,
+                naturezaFinal: 'ABORTADA',
+                statusFinal: 'ABORTADA',
+                historicoFinal: `ABORTADA - MOTIVO: ${motivo}`,
+                resultado: 'ABORTADA',
+                dataHoraEncerramento: new Date().toLocaleString('pt-BR')
+            });
+
+            alert('Ocorrência abortada com sucesso!');
+            modal.style.display = 'none';
+
+            const currentUser = getCurrentUser();
+            const btlToLoad = window.selectedBTL || currentUser.paValue;
+            await loadDispatcherOcorrencias(btlToLoad, document.getElementById('dispatcherContent'));
+        } catch (error) {
+            alert('Erro ao abortar ocorrência: ' + error.message);
+        }
+    });
+
+    document.getElementById('btnCancelarAbortar').addEventListener('click', async () => {
+        const atendimentos = await getData('atendimentos');
+        await showOcorrenciaDetails(key, atendimentos[key]);
+    });
 }
 
 async function showSolicitarApoioDialog(key, ocorrencia, modal) {

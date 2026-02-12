@@ -808,3 +808,92 @@ body {
         opacity: 0.3;
     }
 }
+
+/* Map Marker Overlay - Blinking/Pulsing Location Icon */
+#btlMap {
+    position: relative;
+    overflow: hidden;
+    z-index: 1;
+}
+
+.map-marker-overlay {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40px;
+    height: 40px;
+}
+
+/* Map Overlay Container for Iframe */
+.map-overlay-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 10;
+}
+
+.map-overlay-container .map-marker-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -100%);
+    z-index: 10;
+    pointer-events: none;
+}
+
+/* Styling for Leaflet usage */
+.leaflet-div-icon {
+    background: transparent !important;
+    border: none !important;
+}
+
+.pin-icon {
+    width: 30px;
+    height: 30px;
+    background: #d32f2f;
+    border: 3px solid #fff;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    position: relative;
+    z-index: 2;
+    animation: pin-bounce 1s infinite alternate;
+}
+
+.pin-icon::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    background: #fff;
+    border-radius: 50%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.pin-pulse {
+    position: absolute;
+    width: 15px;
+    height: 15px;
+    background: rgba(211, 47, 47, 0.5);
+    border-radius: 50%;
+    bottom: -5px;
+    left: 50%;
+    transform: translateX(-50%) rotateX(55deg);
+    z-index: 1;
+    animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+}
+
+@keyframes pin-bounce {
+    0% { transform: rotate(-45deg) translateY(0); }
+    100% { transform: rotate(-45deg) translateY(-8px); }
+}
+
+@keyframes pulse-ring {
+    0% { transform: translateX(-50%) rotateX(55deg) scale(0.5); opacity: 0.8; }
+    100% { transform: translateX(-50%) rotateX(55deg) scale(3); opacity: 0; }
+}
