@@ -55,12 +55,23 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
             dispatcherContent.innerHTML = '<p>Nenhuma ocorrência pendente para este BTL.</p>';
         } else {
             const now = Date.now();
-            let html = '<div class="ocorrencias-list-dispatcher">';
+            let html = '<div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">';
+            html += '<button id="btnObservarTodas" class="btn-secondary" style="padding: 8px 16px; font-size: 14px;">👁️ Observar Todas</button>';
+            html += '</div>';
+            html += '<div class="ocorrencias-list-dispatcher">';
+            
             btlOcorrencias.forEach(([key, ocorrencia]) => {
                 const tempoMs = now - ocorrencia.timestamp;
-                const horas = Math.floor(tempoMs / (1000 * 60 * 60));
+                const dias = Math.floor(tempoMs / (1000 * 60 * 60 * 24));
+                const horas = Math.floor((tempoMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutos = Math.floor((tempoMs % (1000 * 60 * 60)) / (1000 * 60));
-                const tempoFormatado = `${horas}h ${minutos}min`;
+                
+                let tempoFormatado;
+                if (dias > 0) {
+                    tempoFormatado = `${dias}d ${horas}h`;
+                } else {
+                    tempoFormatado = `${horas}h ${minutos}min`;
+                }
 
                 const naturezaCodigo = ocorrencia.natureza.split(' - ')[0];
 
@@ -77,10 +88,13 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
                 const hasVTR = assignedOcorrencias.has(key);
 
                 const isReiteradaNaoLida = ocorrencia.ultimaReiteracao && !ocorrencia.reiteracaoLida;
+                const isObservada = ocorrencia.observada || false;
 
                 let itemClass = 'ocorrencia-item-dispatcher';
                 if (isReiteradaNaoLida) {
                     itemClass += ' ocorrencia-reiterada-nao-lida';
+                } else if (!isObservada) {
+                    itemClass += ' ocorrencia-nao-observada';
                 }
 
                 const showInPendencias = !hasVTR || isReiteradaNaoLida;
@@ -91,10 +105,13 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
                 if (isApoio) {
                     apoioLabel = '<span style="background: #ff9800; color: white; padding: 3px 8px; border-radius: 3px; font-size: 12px; margin-left: 5px;">APOIO</span>';
                 }
+                
+                const checkIcon = isObservada ? '<span style="color: #1976d2; font-size: 18px; margin-right: 5px;">✓</span>' : '';
 
                 if (showInPendencias) {
                     html += `
                         <div class="${itemClass}" data-key="${key}" style="display: flex; align-items: center; gap: 10px; padding: 10px 15px;">
+                            ${checkIcon}
                             <span style="font-weight: 600; font-size: 16px; min-width: 50px;">#${ocorrencia.numeroRegistro}${apoioLabel}</span>
                             <span style="flex: 1; font-size: 14px;">${ocorrencia.rua}, ${ocorrencia.numero}</span>
                             <span style="font-weight: 600; font-size: 14px; ${corNatureza} min-width: 60px;">${naturezaCodigo}</span>
@@ -107,26 +124,40 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
             html += '</div>';
             dispatcherContent.innerHTML = html;
 
+            // Setup "Observar Todas" button
+            const btnObservarTodas = document.getElementById('btnObservarTodas');
+            if (btnObservarTodas) {
+                btnObservarTodas.addEventListener('click', async () => {
+                    await showObservarTodasDialog(btlOcorrencias, btlNumber);
+                });
+            }
+
             document.querySelectorAll('.ocorrencia-item-dispatcher').forEach(item => {
                 item.addEventListener('click', async () => {
                     const key = item.getAttribute('data-key');
                     const atendimentos = await getData('atendimentos');
                     const ocorrencia = atendimentos[key];
 
+                    // Always append observed flag and mark reiteracao as read if present
+                    const atendimentoRef = getRef(`atendimentos/${key}`);
+
+                    // If not observed, set observada true
+                    if (!ocorrencia.observada) {
+                        await update(atendimentoRef, { observada: true });
+                    }
+
+                    // If there is an ultima reiteração not read, mark as read
                     if (ocorrencia.ultimaReiteracao && !ocorrencia.reiteracaoLida) {
-                        const atendimentoRef = getRef(`atendimentos/${key}`);
-                        await update(atendimentoRef, {
-                            reiteracaoLida: true
-                        });
+                        await update(atendimentoRef, { reiteracaoLida: true });
                     }
 
-                    item.classList.remove('ocorrencia-reiterada-nao-lida');
+                    // Reload latest ocorrencia data and open details modal so user sees all observations
+                    const updatedAtendimentos = await getData('atendimentos');
+                    const updatedOcorrencia = updatedAtendimentos[key];
 
-                    const vtrAssignments = await getData('vtrAssignments') || {};
-                    const hasVTR = Object.values(vtrAssignments).some(v => v.ocorrenciaId === key);
-                    if (hasVTR) {
-                        item.remove();
-                    }
+                    // Open the occurrence details modal
+                    const { showOcorrenciaDetails } = await import('./occurrence-modal.js');
+                    await showOcorrenciaDetails(key, updatedOcorrencia);
                 });
 
                 item.addEventListener('dblclick', async () => {
@@ -171,6 +202,80 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
     }
 }
 
+async function showObservarTodasDialog(btlOcorrencias, btlNumber) {
+    // NOTE: now this will append the same observation to ALL matching ocorrencias
+    const modal = document.getElementById('ocorrenciaModal');
+    const modalContent = document.getElementById('ocorrenciaModalContent');
+
+    // Use all btlOcorrencias (not only previously unobserved)
+    const ocorrenciasParaObservar = btlOcorrencias;
+
+    let html = `
+        <h2>Observar Todas as Ocorrências (${ocorrenciasParaObservar.length})</h2>
+        <div style="margin: 20px 0;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Digite sua observação (mínimo 10 caracteres):</label>
+            <textarea id="observacaoTextoTodas" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px;"></textarea>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button id="btnConfirmarObservacaoTodas" class="btn-cadastro" style="flex: 1;">OK</button>
+                <button id="btnCancelarObservacaoTodas" class="btn-secondary" style="flex: 1;">Cancelar</button>
+            </div>
+        </div>
+    `;
+
+    modalContent.innerHTML = html;
+    modal.style.display = 'block';
+
+    const observacaoTexto = document.getElementById('observacaoTextoTodas');
+    observacaoTexto.addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    document.getElementById('btnConfirmarObservacaoTodas').addEventListener('click', async () => {
+        const texto = observacaoTexto.value.trim();
+
+        if (texto.length < 10) {
+            alert('A observação deve ter no mínimo 10 caracteres');
+            return;
+        }
+
+        try {
+            const dataHora = new Date().toLocaleString('pt-BR');
+            let count = 0;
+            
+            // For each matching occurrence, append the new observation (even if it already had observations)
+            for (const [key] of ocorrenciasParaObservar) {
+                const atendimentoRef = getRef(`atendimentos/${key}`);
+                const atendimentos = await getData('atendimentos');
+                const ocorrenciaAtual = atendimentos[key];
+
+                const observacoes = ocorrenciaAtual.observacoes || [];
+                observacoes.push({
+                    dataHora: dataHora,
+                    texto: texto
+                });
+
+                await update(atendimentoRef, {
+                    observacoes: observacoes,
+                    observada: true
+                });
+
+                count++;
+            }
+
+            alert(`${count} ocorrência(s) atualizada(s) com a observação!`);
+            modal.style.display = 'none';
+
+            await loadDispatcherOcorrencias(btlNumber, document.getElementById('dispatcherContent'));
+        } catch (error) {
+            alert('Erro ao registrar observações: ' + error.message);
+        }
+    });
+
+    document.getElementById('btnCancelarObservacaoTodas').addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
+}
+
 export async function registerVTR(vtrNumber) {
     try {
         const leadingDigits = vtrNumber.match(/^\d+/);
@@ -179,9 +284,19 @@ export async function registerVTR(vtrNumber) {
             return false;
         }
         
+        // Check for duplicates
+        const vtrsDisponiveis = await getData('vtrsDisponiveis') || {};
+        const existingVTR = Object.values(vtrsDisponiveis).find(vtr => vtr.vtrNumber === vtrNumber);
+        
+        if (existingVTR) {
+            alert(`VTR ${vtrNumber} já está cadastrada no sistema!`);
+            return false;
+        }
+        
         await pushData('vtrsDisponiveis', {
             vtrNumber: vtrNumber,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            status: 'DISPONIVEL'
         });
 
         const currentUser = getCurrentUser();

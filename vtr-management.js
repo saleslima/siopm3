@@ -22,17 +22,83 @@ export async function loadVTRPanels(btlNumber) {
                 const vtrPrefix = vtr.vtrNumber.substring(0, 2);
                 return vtrPrefix === btlPrefix;
             })
-            .sort((a, b) => a[1].vtrNumber.localeCompare(b[1].vtrNumber));
+            .sort((a, b) => {
+                const statusA = a[1].status || 'DISPONIVEL';
+                const statusB = b[1].status || 'DISPONIVEL';
+                
+                // Priority: DISPONIVEL and RONDA ESCOLAR first
+                const priorityA = (statusA === 'DISPONIVEL' || statusA === 'RONDA ESCOLAR') ? 0 : 1;
+                const priorityB = (statusB === 'DISPONIVEL' || statusB === 'RONDA ESCOLAR') ? 0 : 1;
+                
+                if (priorityA !== priorityB) return priorityA - priorityB;
+                
+                return a[1].vtrNumber.localeCompare(b[1].vtrNumber);
+            });
 
         const vtrDisponiveisContent = document.getElementById('vtrDisponiveisContent');
-        if (availableVTRs.length === 0) {
+        
+        // Add filter dropdown if not exists
+        const vtrPanelRight = document.getElementById('vtrDisponiveis');
+        let filterSelect = document.getElementById('vtrStatusFilter');
+        if (!filterSelect && vtrPanelRight) {
+            const filterContainer = document.createElement('div');
+            filterContainer.style.cssText = 'margin-bottom: 10px;';
+            filterContainer.innerHTML = `
+                <select id="vtrStatusFilter" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+                    <option value="TODAS">Exibir Todas</option>
+                    <option value="DISPONIVEL">Somente Disponíveis</option>
+                </select>
+            `;
+            vtrPanelRight.insertBefore(filterContainer, vtrDisponiveisContent);
+            filterSelect = document.getElementById('vtrStatusFilter');
+            
+            filterSelect.addEventListener('change', async () => {
+                await loadVTRPanels(btlNumber);
+            });
+        }
+        
+        const filterValue = filterSelect ? filterSelect.value : 'TODAS';
+        
+        let filteredVTRs = availableVTRs;
+        if (filterValue === 'DISPONIVEL') {
+            filteredVTRs = availableVTRs.filter(([key, vtr]) => vtr.status === 'DISPONIVEL');
+        }
+        
+        if (filteredVTRs.length === 0) {
             vtrDisponiveisContent.innerHTML = '<p class="no-vtrs">Nenhuma VTR disponível</p>';
         } else {
             let html = '';
-            availableVTRs.forEach(([key, vtr]) => {
-                html += `<div class="vtr-disponivel-item" data-vtr="${vtr.vtrNumber}">${vtr.vtrNumber}</div>`;
+            filteredVTRs.forEach(([key, vtr]) => {
+                const status = vtr.status || 'DISPONIVEL';
+                const statusClass = `vtr-status-${status.toLowerCase().replace(/\s+/g, '-')}`;
+                const isAvailable = status === 'DISPONIVEL' || status === 'RONDA ESCOLAR';
+                const textOpacity = isAvailable ? '1' : '0.4';
+                
+                const icon = status === 'RONDA ESCOLAR' ? '📚 ' : '';
+                
+                html += `
+                    <div class="vtr-disponivel-item ${statusClass}" data-vtr="${vtr.vtrNumber}" data-vtr-key="${key}" style="opacity: ${textOpacity}; cursor: pointer; position: relative;">
+                        ${icon}${vtr.vtrNumber}
+                    </div>
+                `;
             });
             vtrDisponiveisContent.innerHTML = html;
+            
+            // Add click handlers to change status (both right-click and double-click)
+            document.querySelectorAll('.vtr-disponivel-item').forEach(item => {
+                item.addEventListener('contextmenu', async (e) => {
+                    e.preventDefault();
+                    const vtrKey = item.getAttribute('data-vtr-key');
+                    const vtrNum = item.getAttribute('data-vtr');
+                    await showStatusChangeMenu(vtrKey, vtrNum, btlNumber);
+                });
+                
+                item.addEventListener('dblclick', async (e) => {
+                    const vtrKey = item.getAttribute('data-vtr-key');
+                    const vtrNum = item.getAttribute('data-vtr');
+                    await showStatusChangeMenu(vtrKey, vtrNum, btlNumber);
+                });
+            });
         }
 
         // Group assignments by VTR number so each VTR appears only once
@@ -139,4 +205,48 @@ export async function loadVTRPanels(btlNumber) {
     } catch (error) {
         console.error('Erro ao carregar VTRs:', error);
     }
+}
+
+async function showStatusChangeMenu(vtrKey, vtrNum, btlNumber) {
+    const currentVTR = await getData(`vtrsDisponiveis/${vtrKey}`);
+    const currentStatus = currentVTR?.status || 'DISPONIVEL';
+    
+    const modal = document.getElementById('ocorrenciaModal');
+    const modalContent = document.getElementById('ocorrenciaModalContent');
+    
+    let html = `
+        <h2>Alterar Status - VTR ${vtrNum}</h2>
+        <div style="margin: 20px 0;">
+            <p style="margin-bottom: 15px;"><strong>Status Atual:</strong> ${currentStatus}</p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <button class="btn-status" data-status="DISPONIVEL" style="background: #4caf50; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">DISPONÍVEL</button>
+                <button class="btn-status" data-status="RONDA ESCOLAR" style="background: #4caf50; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">📚 RONDA ESCOLAR</button>
+                <button class="btn-status" data-status="OPERACAO ESPECIAL" style="background: #ffc107; color: black; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">OPERAÇÃO ESPECIAL</button>
+                <button class="btn-status" data-status="ALIMENTACAO" style="background: #ff9800; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">ALIMENTAÇÃO</button>
+                <button class="btn-status" data-status="BAIXA MECANICA" style="background: #f44336; color: white; padding: 12px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">BAIXA MECÂNICA</button>
+            </div>
+            <button id="btnCancelarStatus" class="btn-secondary" style="width: 100%; margin-top: 15px;">Cancelar</button>
+        </div>
+    `;
+    
+    modalContent.innerHTML = html;
+    modal.style.display = 'block';
+    
+    document.querySelectorAll('.btn-status').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const newStatus = btn.getAttribute('data-status');
+            const { updateData } = await import('./database.js');
+            
+            await updateData(`vtrsDisponiveis/${vtrKey}`, {
+                status: newStatus
+            });
+            
+            modal.style.display = 'none';
+            await loadVTRPanels(btlNumber);
+        });
+    });
+    
+    document.getElementById('btnCancelarStatus').addEventListener('click', () => {
+        modal.style.display = 'none';
+    });
 }

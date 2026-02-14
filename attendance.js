@@ -311,7 +311,8 @@ export async function reiterarOcorrencia(ocorrenciaKey, complemento = null) {
         await update(atendimentoRef, {
             reiteracoes: reiteracoes,
             ultimaReiteracao: now.toLocaleString('pt-BR'),
-            reiteracaoLida: false
+            reiteracaoLida: false,
+            observada: false  // Reset observed state when reiterated
         });
         
         return true;

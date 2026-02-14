@@ -23,18 +23,18 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
     const availableVTRs = Object.entries(vtrsDisponiveis)
         .filter(([key, vtr]) => {
             if (assignedVTRNumbers.has(vtr.vtrNumber)) return false;
-
             const vtrPrefix = vtr.vtrNumber.substring(0, 2);
-            return vtrPrefix === btlPrefix;
+            const status = vtr.status || 'DISPONIVEL';
+            return vtrPrefix === btlPrefix && (status === 'DISPONIVEL' || status === 'RONDA ESCOLAR');
         })
         .sort((a, b) => a[1].vtrNumber.localeCompare(b[1].vtrNumber));
 
     const busyVTRs = Object.entries(vtrsDisponiveis)
         .filter(([key, vtr]) => {
             if (!assignedVTRNumbers.has(vtr.vtrNumber)) return false;
-
             const vtrPrefix = vtr.vtrNumber.substring(0, 2);
-            return vtrPrefix === btlPrefix;
+            const status = vtr.status || 'DISPONIVEL';
+            return vtrPrefix === btlPrefix && status === 'DISPONIVEL';
         })
         .sort((a, b) => a[1].vtrNumber.localeCompare(b[1].vtrNumber));
 
@@ -84,6 +84,16 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
 
     const isSOP = ocorrencia.gravidade === 'SOP';
 
+    // Build observacoes HTML list if present
+    let observacoesHTML = '';
+    if (ocorrencia.observacoes && ocorrencia.observacoes.length > 0) {
+        observacoesHTML = '<div style="margin-top: 15px; padding: 10px; background: #fff8e1; border-radius: 4px;"><h4 style="margin-top: 0;">Observações</h4>';
+        ocorrencia.observacoes.forEach(obs => {
+            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]</strong> ${obs.texto}</p>`;
+        });
+        observacoesHTML += '</div>';
+    }
+
     let html = `
         <h2>Detalhes da Ocorrência #${ocorrencia.numeroRegistro}</h2>
         <div class="modal-details">
@@ -101,6 +111,7 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
             ${ocorrencia.complemento ? `<p><strong>Complemento:</strong> ${ocorrencia.complemento}</p>` : ''}
             ${ocorrencia.dataHoraIrradiado ? `<p><strong>Irradiado em:</strong> ${ocorrencia.dataHoraIrradiado}</p>` : ''}
             ${ocorrencia.observacaoRedirecionamento ? `<p><strong>Observação Redirecionamento:</strong> ${ocorrencia.observacaoRedirecionamento}</p>` : ''}
+            ${observacoesHTML}
         </div>
         ${veiculosHTML}
         ${pessoasHTML}
@@ -133,6 +144,7 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
                     ${vtrOptionsHTML}
                 </select>
                 <button id="btnConfirmarVTR" class="btn-cadastro">Confirmar</button>
+                <button id="btnObservarOcorrencia" class="btn-secondary" style="width: 100%; margin-top: 10px;">👁️ Observar</button>
                 <button id="btnAbortarOcorrencia" class="btn-secondary" style="width: 100%; margin-top: 10px; background-color: #ff9800; color: white;">Abortar Ocorrência</button>
                 <button id="btnSolicitarApoio" class="btn-secondary" style="width: 100%; margin-top: 10px;">Solicitar Apoio</button>
                 <button id="btnRedirecionar" class="btn-secondary" style="width: 100%; margin-top: 10px;">Redirecionar</button>
@@ -150,6 +162,13 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
 }
 
 function setupOcorrenciaModalHandlers(key, ocorrencia, modal, isSOP) {
+    const btnObservarOcorrencia = document.getElementById('btnObservarOcorrencia');
+    if (btnObservarOcorrencia) {
+        btnObservarOcorrencia.addEventListener('click', async () => {
+            await showObservarDialog(key, ocorrencia, modal);
+        });
+    }
+
     const btnRedirecionar = document.getElementById('btnRedirecionar');
     if (btnRedirecionar) {
         btnRedirecionar.addEventListener('click', async () => {
@@ -323,6 +342,80 @@ async function showAbortarDialog(key, ocorrencia, modal) {
     document.getElementById('btnCancelarAbortar').addEventListener('click', async () => {
         const atendimentos = await getData('atendimentos');
         await showOcorrenciaDetails(key, atendimentos[key]);
+    });
+}
+
+async function showObservarDialog(key, ocorrencia, modal) {
+    const modalContent = document.getElementById('ocorrenciaModalContent');
+    const currentHTML = modalContent.innerHTML;
+
+    let observacoesHTML = '';
+    if (ocorrencia.observacoes && ocorrencia.observacoes.length > 0) {
+        observacoesHTML = '<div style="margin-bottom: 15px; padding: 10px; background: #f0f0f0; border-radius: 4px;"><h4 style="margin-top: 0;">Observações Anteriores:</h4>';
+        ocorrencia.observacoes.forEach(obs => {
+            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]</strong> ${obs.texto}</p>`;
+        });
+        observacoesHTML += '</div>';
+    }
+
+    let html = `
+        <h2>Observar Ocorrência #${ocorrencia.numeroRegistro}</h2>
+        ${observacoesHTML}
+        <div style="margin: 20px 0;">
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Digite sua observação (mínimo 10 caracteres):</label>
+            <textarea id="observacaoTexto" rows="4" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 14px;"></textarea>
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button id="btnConfirmarObservacao" class="btn-cadastro" style="flex: 1;">OK</button>
+                <button id="btnCancelarObservacao" class="btn-secondary" style="flex: 1;">Cancelar</button>
+            </div>
+        </div>
+    `;
+
+    modalContent.innerHTML = html;
+
+    const observacaoTexto = document.getElementById('observacaoTexto');
+    observacaoTexto.addEventListener('input', (e) => {
+        e.target.value = e.target.value.toUpperCase();
+    });
+
+    document.getElementById('btnConfirmarObservacao').addEventListener('click', async () => {
+        const texto = observacaoTexto.value.trim();
+
+        if (texto.length < 10) {
+            alert('A observação deve ter no mínimo 10 caracteres');
+            return;
+        }
+
+        try {
+            const atendimentoRef = getRef(`atendimentos/${key}`);
+            const atendimentos = await getData('atendimentos');
+            const ocorrenciaAtual = atendimentos[key];
+
+            const observacoes = ocorrenciaAtual.observacoes || [];
+            observacoes.push({
+                dataHora: new Date().toLocaleString('pt-BR'),
+                texto: texto
+            });
+
+            await update(atendimentoRef, {
+                observacoes: observacoes,
+                observada: true
+            });
+
+            alert('Observação registrada com sucesso!');
+            modal.style.display = 'none';
+
+            const currentUser = getCurrentUser();
+            const btlToLoad = window.selectedBTL || currentUser.paValue;
+            await loadDispatcherOcorrencias(btlToLoad, document.getElementById('dispatcherContent'));
+        } catch (error) {
+            alert('Erro ao registrar observação: ' + error.message);
+        }
+    });
+
+    document.getElementById('btnCancelarObservacao').addEventListener('click', () => {
+        modalContent.innerHTML = currentHTML;
+        setupOcorrenciaModalHandlers(key, ocorrencia, modal, ocorrencia.gravidade === 'SOP');
     });
 }
 
