@@ -35,6 +35,7 @@ import { setupFormHandlers } from './form-handlers.js';
 import { showUserDashboard, showDispatcherScreen, showSupervisorScreen } from './ui-screens.js';
 import { detectBTLFromAddress, preloadMaps } from './btl-detector.js';
 import { setupAdminHandlers } from './admin.js';
+import './keyboard-shortcuts.js';
 
 const app = initializeApp(firebaseConfig);
 initDatabase(app);
@@ -233,14 +234,21 @@ cepInput.addEventListener('blur', async (e) => {
                 document.getElementById('municipio').value = data.localidade.toUpperCase();
                 document.getElementById('estado').value = data.uf.toUpperCase();
                 
-                // Try to detect BTL after CEP fills address
+                // Try to detect BTL only if both rua and numero are filled; otherwise wait for numero blur
                 const numero = document.getElementById('numero').value.trim();
-                await detectBTLFromAddress(
-                    data.logradouro.toUpperCase(),
-                    numero || '',
-                    data.localidade.toUpperCase(),
-                    data.uf.toUpperCase()
-                );
+                const rua = (data.logradouro || '').toUpperCase().trim();
+                if (rua && numero) {
+                    await detectBTLFromAddress(
+                        rua,
+                        numero,
+                        data.localidade.toUpperCase(),
+                        data.uf.toUpperCase()
+                    );
+                } else {
+                    // show coords placeholder when only rua exists, but don't run full detection
+                    document.getElementById('btlStatus').textContent = 'Preencha número para iniciar detecção BTL';
+                    document.getElementById('btlStatus').style.color = '#666';
+                }
             } else {
                 showMessage(attendanceMessage, 'CEP não encontrado.', 'error');
             }
@@ -361,7 +369,11 @@ function showRuaSuggestions(items) {
         ruaSuggestionsBox.appendChild(div);
     });
 
-    ruaSuggestionsBox.style.display = 'block';
+    // display suggestions horizontally
+    ruaSuggestionsBox.style.display = 'flex';
+    ruaSuggestionsBox.style.flexDirection = 'row';
+    ruaSuggestionsBox.style.flexWrap = 'wrap';
+    ruaSuggestionsBox.style.gap = '6px';
 }
 
 ruaInput.addEventListener('input', (e) => {

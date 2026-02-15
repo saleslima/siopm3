@@ -56,7 +56,8 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
         } else {
             const now = Date.now();
             let html = '<div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">';
-            html += '<button id="btnObservarTodas" class="btn-secondary" style="padding: 8px 16px; font-size: 14px;">👁️ Observar Todas</button>';
+            // Mark the shortcut letter (O) in bold for "Observar Todas"
+            html += '<button id="btnObservarTodas" class="btn-secondary" data-shortcut="O" style="padding: 8px 16px; font-size: 14px;">👁️ <strong>O</strong>bservar Todas</button>';
             html += '</div>';
             html += '<div class="ocorrencias-list-dispatcher">';
             

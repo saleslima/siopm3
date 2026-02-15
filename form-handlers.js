@@ -227,6 +227,18 @@ export function setupFormHandlers(allScreens) {
 
         if (success) {
             attendanceForm.reset();
+            // Ensure BTL-related UI cleared for atendente mode
+            const btlMap = document.getElementById('btlMap');
+            if (btlMap) btlMap.style.display = 'none';
+            const btlCoordinates = document.getElementById('btlCoordinates');
+            if (btlCoordinates) btlCoordinates.textContent = '';
+            const btlStatus = document.getElementById('btlStatus');
+            if (btlStatus) btlStatus.textContent = '';
+
+            // Clear selected BTL value explicitly
+            const btlSelect = document.getElementById('btl');
+            if (btlSelect) btlSelect.value = '';
+
             renderVeiculos(document.getElementById('veiculosAdicionados'));
             renderPessoas(document.getElementById('pessoasAdicionadas'));
             renderImeis(document.getElementById('imeisAdicionados'));
