@@ -95,6 +95,36 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
         observacoesHTML += '</div>';
     }
 
+    // Compute some admin-friendly timing and counts (if available)
+    const numReiteracoes = ocorrencia.reiteracoes ? ocorrencia.reiteracoes.length : 0;
+    let tempoAberturaText = '—';
+    if (ocorrencia.abriuTimestamp) {
+        const abriuTs = typeof ocorrencia.abriuTimestamp === 'number' ? ocorrencia.abriuTimestamp : parseInt(ocorrencia.abriuTimestamp || '0');
+        if (!Number.isNaN(abriuTs)) {
+            const diffMs = abriuTs - (ocorrencia.timestamp || 0);
+            if (!Number.isNaN(diffMs) && diffMs >= 0) {
+                const dias = Math.floor(diffMs / (1000*60*60*24));
+                const horas = Math.floor((diffMs % (1000*60*60*24)) / (1000*60*60));
+                const minutos = Math.floor((diffMs % (1000*60*60)) / (1000*60));
+                tempoAberturaText = dias > 0 ? `${dias}d ${horas}h` : `${horas}h ${minutos}min`;
+            }
+        }
+    }
+
+    // Time-to-read for last reiteration if available
+    let tempoReiteracaoLidaText = '—';
+    if (ocorrencia.ultimaReiteracaoTimestamp && ocorrencia.reiteracaoLidaTimestamp) {
+        const diff = (ocorrencia.reiteracaoLidaTimestamp) - (ocorrencia.ultimaReiteracaoTimestamp);
+        if (!Number.isNaN(diff) && diff >= 0) {
+            const mins = Math.floor(diff / (1000*60));
+            if (mins < 60) tempoReiteracaoLidaText = `${mins} min`;
+            else {
+                const hrs = Math.floor(mins/60);
+                tempoReiteracaoLidaText = `${hrs} h ${mins%60} m`;
+            }
+        }
+    }
+
     let html = `
         <h2>Detalhes da Ocorrência #${ocorrencia.numeroRegistro}</h2>
         <div class="modal-details">
@@ -112,6 +142,9 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
             ${ocorrencia.complemento ? `<p><strong>Complemento:</strong> ${ocorrencia.complemento}</p>` : ''}
             ${ocorrencia.dataHoraIrradiado ? `<p><strong>Irradiado em:</strong> ${ocorrencia.dataHoraIrradiado}</p>` : ''}
             ${ocorrencia.observacaoRedirecionamento ? `<p><strong>Observação Redirecionamento:</strong> ${ocorrencia.observacaoRedirecionamento}</p>` : ''}
+            <p style="margin-top:8px;"><strong>Nº Reiterações:</strong> ${numReiteracoes}</p>
+            <p><strong>Tempo até abertura:</strong> ${tempoAberturaText}</p>
+            <p><strong>Tempo para leitura da última reiteração:</strong> ${tempoReiteracaoLidaText}</p>
             ${observacoesHTML}
         </div>
         ${veiculosHTML}
@@ -394,17 +427,17 @@ async function showObservarDialog(key, ocorrencia, modal) {
             const ocorrenciaAtual = atendimentos[key];
 
             const observacoes = ocorrenciaAtual.observacoes || [];
-            const currentUser = getCurrentUser();
+            const observingUser = getCurrentUser();
             let usuarioNome = '';
             let usuarioRE = '';
             
-            if (currentUser) {
-                if (currentUser.tipo === 'MILITAR') {
-                    usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
-                    usuarioRE = currentUser.re || '';
+            if (observingUser) {
+                if (observingUser.tipo === 'MILITAR') {
+                    usuarioNome = observingUser.graduacao ? `${observingUser.graduacao} ${observingUser.nomeGuerra}` : observingUser.nomeGuerra;
+                    usuarioRE = observingUser.re || '';
                 } else {
-                    usuarioNome = currentUser.nomeCompleto || '';
-                    usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+                    usuarioNome = observingUser.nomeCompleto || '';
+                    usuarioRE = observingUser.cpf ? observingUser.cpf.replace(/\D/g, '') : '';
                 }
             }
 

@@ -295,6 +295,7 @@ export async function reiterarOcorrencia(ocorrenciaKey, complemento = null) {
         
         const reiteracao = {
             dataHora: now.toLocaleString('pt-BR'),
+            dataHoraTimestamp: now.getTime(),
             tipo: 'REITERAÇÃO'
         };
         
@@ -308,9 +309,11 @@ export async function reiterarOcorrencia(ocorrenciaKey, complemento = null) {
         const reiteracoes = ocorrencia.reiteracoes || [];
         reiteracoes.push(reiteracao);
         
+        // store both human-readable and timestamp for ultimaReiteracao for later time-to-read calculations
         await update(atendimentoRef, {
             reiteracoes: reiteracoes,
             ultimaReiteracao: now.toLocaleString('pt-BR'),
+            ultimaReiteracaoTimestamp: now.getTime(),
             reiteracaoLida: false,
             observada: false  // Reset observed state when reiterated
         });

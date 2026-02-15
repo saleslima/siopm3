@@ -138,17 +138,60 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
                     const atendimentos = await getData('atendimentos');
                     const ocorrencia = atendimentos[key];
 
-                    // Always append observed flag and mark reiteracao as read if present
+                    // Always append observed flag and mark reiteracao as read if present,
+                    // plus record timestamps and create an automatic observation entry when first opened.
                     const atendimentoRef = getRef(`atendimentos/${key}`);
 
-                    // If not observed, set observada true
+                    const updates = {};
+                    const now = new Date();
+                    const nowLocale = now.toLocaleString('pt-BR');
+                    const nowTs = now.getTime();
+
+                    // If not observed, append a system observation and set opened timestamp
                     if (!ocorrencia.observada) {
-                        await update(atendimentoRef, { observada: true });
+                        // Build observation entry with current user info
+                        const currentUser = getCurrentUser();
+                        let usuarioNome = '';
+                        let usuarioRE = '';
+                        if (currentUser) {
+                            if (currentUser.tipo === 'MILITAR') {
+                                usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
+                                usuarioRE = currentUser.re || '';
+                            } else {
+                                usuarioNome = currentUser.nomeCompleto || '';
+                                usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+                            }
+                        }
+
+                        const observacaoSistema = {
+                            dataHora: nowLocale,
+                            texto: 'OCORRÊNCIA OBSERVADA',
+                            usuario: usuarioNome,
+                            re: usuarioRE,
+                            sistema: true
+                        };
+
+                        const atendimentosAll = await getData('atendimentos');
+                        const ocorrAtual = atendimentosAll[key];
+                        const observacoesExistentes = ocorrAtual.observacoes || [];
+                        observacoesExistentes.push(observacaoSistema);
+
+                        updates.observacoes = observacoesExistentes;
+                        updates.observada = true;
+                        updates.abriuTimestamp = nowTs;
+                        updates.abriuDataHora = nowLocale;
                     }
 
-                    // If there is an ultima reiteração not read, mark as read
+                    // If there is an ultima reiteração not read, mark as read and record read timestamp
                     if (ocorrencia.ultimaReiteracao && !ocorrencia.reiteracaoLida) {
-                        await update(atendimentoRef, { reiteracaoLida: true });
+                        updates.reiteracaoLida = true;
+                        updates.reiteracaoLidaTimestamp = nowTs;
+                        updates.reiteracaoLidaDataHora = nowLocale;
+                    }
+
+                    // Apply updates if any
+                    if (Object.keys(updates).length > 0) {
+                        await update(atendimentoRef, updates);
                     }
 
                     // Reload latest ocorrencia data and open details modal so user sees all observations
