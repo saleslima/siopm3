@@ -2,6 +2,7 @@
 
 import { getData, getRef } from './database.js';
 import { update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getCurrentUser } from './auth.js';
 
 export function setupModalClose(modal) {
     const closeBtn = modal.querySelector('.close');
@@ -56,9 +57,26 @@ export async function addComplementoToOcorrencia(key, complementoTexto) {
     const ocorrenciaAtual = atendimentos[key];
 
     const complementos = ocorrenciaAtual.complementos || [];
+
+    const currentUser = getCurrentUser();
+    let usuarioNome = '';
+    let usuarioRE = '';
+    
+    if (currentUser) {
+        if (currentUser.tipo === 'MILITAR') {
+            usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
+            usuarioRE = currentUser.re || '';
+        } else {
+            usuarioNome = currentUser.nomeCompleto || '';
+            usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+        }
+    }
+
     complementos.push({
         dataHora: now.toLocaleString('pt-BR'),
-        texto: complementoTexto
+        texto: complementoTexto,
+        usuario: usuarioNome,
+        re: usuarioRE
     });
 
     await update(atendimentoRef, { complementos });

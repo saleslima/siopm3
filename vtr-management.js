@@ -74,7 +74,26 @@ export async function loadVTRPanels(btlNumber) {
                 const isAvailable = status === 'DISPONIVEL' || status === 'RONDA ESCOLAR';
                 const textOpacity = isAvailable ? '1' : '0.4';
                 
-                const icon = status === 'RONDA ESCOLAR' ? '📚 ' : '';
+                let icon = '';
+                switch(status) {
+                    case 'DISPONIVEL':
+                        icon = '🫡 ';
+                        break;
+                    case 'RONDA ESCOLAR':
+                        icon = '📚 ';
+                        break;
+                    case 'OPERACAO ESPECIAL':
+                        icon = '⚔️ ';
+                        break;
+                    case 'ALIMENTACAO':
+                        icon = '🍴 ';
+                        break;
+                    case 'BAIXA MECANICA':
+                        icon = '👎 ';
+                        break;
+                    default:
+                        icon = '';
+                }
                 
                 html += `
                     <div class="vtr-disponivel-item ${statusClass}" data-vtr="${vtr.vtrNumber}" data-vtr-key="${key}" style="opacity: ${textOpacity}; cursor: pointer; position: relative;">

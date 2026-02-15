@@ -1,14 +1,15 @@
 import { getData } from './database.js';
 import { showMessage, showScreen } from './utils.js';
 
-export let currentUser = null;
+// internal state variable to avoid duplicate identifier collisions in some environments
+let currentUserState = null;
 
 export function setCurrentUser(user) {
-    currentUser = user;
+    currentUserState = user;
 }
 
 export function getCurrentUser() {
-    return currentUser;
+    return currentUserState;
 }
 
 export async function loadUserProfiles(loginPerfilSelect) {

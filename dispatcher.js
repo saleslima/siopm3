@@ -240,6 +240,19 @@ async function showObservarTodasDialog(btlOcorrencias, btlNumber) {
 
         try {
             const dataHora = new Date().toLocaleString('pt-BR');
+            const currentUser = getCurrentUser();
+            let usuarioNome = '';
+            let usuarioRE = '';
+            
+            if (currentUser) {
+                if (currentUser.tipo === 'MILITAR') {
+                    usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
+                    usuarioRE = currentUser.re || '';
+                } else {
+                    usuarioNome = currentUser.nomeCompleto || '';
+                    usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+                }
+            }
             let count = 0;
             
             // For each matching occurrence, append the new observation (even if it already had observations)
@@ -251,7 +264,9 @@ async function showObservarTodasDialog(btlOcorrencias, btlNumber) {
                 const observacoes = ocorrenciaAtual.observacoes || [];
                 observacoes.push({
                     dataHora: dataHora,
-                    texto: texto
+                    texto: texto,
+                    usuario: usuarioNome,
+                    re: usuarioRE
                 });
 
                 await update(atendimentoRef, {

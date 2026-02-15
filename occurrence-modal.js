@@ -89,7 +89,8 @@ export async function showOcorrenciaDetails(key, ocorrencia) {
     if (ocorrencia.observacoes && ocorrencia.observacoes.length > 0) {
         observacoesHTML = '<div style="margin-top: 15px; padding: 10px; background: #fff8e1; border-radius: 4px;"><h4 style="margin-top: 0;">Observações</h4>';
         ocorrencia.observacoes.forEach(obs => {
-            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]</strong> ${obs.texto}</p>`;
+            const userInfo = obs.re && obs.usuario ? ` - RE: ${obs.re} | ${obs.usuario}` : '';
+            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]${userInfo}</strong> ${obs.texto}</p>`;
         });
         observacoesHTML += '</div>';
     }
@@ -353,7 +354,8 @@ async function showObservarDialog(key, ocorrencia, modal) {
     if (ocorrencia.observacoes && ocorrencia.observacoes.length > 0) {
         observacoesHTML = '<div style="margin-bottom: 15px; padding: 10px; background: #f0f0f0; border-radius: 4px;"><h4 style="margin-top: 0;">Observações Anteriores:</h4>';
         ocorrencia.observacoes.forEach(obs => {
-            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]</strong> ${obs.texto}</p>`;
+            const userInfo = obs.re && obs.usuario ? ` - RE: ${obs.re} | ${obs.usuario}` : '';
+            observacoesHTML += `<p style="margin: 5px 0; font-size: 13px;"><strong>[${obs.dataHora}]${userInfo}</strong> ${obs.texto}</p>`;
         });
         observacoesHTML += '</div>';
     }
@@ -392,9 +394,25 @@ async function showObservarDialog(key, ocorrencia, modal) {
             const ocorrenciaAtual = atendimentos[key];
 
             const observacoes = ocorrenciaAtual.observacoes || [];
+            const currentUser = getCurrentUser();
+            let usuarioNome = '';
+            let usuarioRE = '';
+            
+            if (currentUser) {
+                if (currentUser.tipo === 'MILITAR') {
+                    usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
+                    usuarioRE = currentUser.re || '';
+                } else {
+                    usuarioNome = currentUser.nomeCompleto || '';
+                    usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+                }
+            }
+
             observacoes.push({
                 dataHora: new Date().toLocaleString('pt-BR'),
-                texto: texto
+                texto: texto,
+                usuario: usuarioNome,
+                re: usuarioRE
             });
 
             await update(atendimentoRef, {

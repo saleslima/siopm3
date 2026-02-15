@@ -17,6 +17,7 @@ import {
 } from './attendance.js';
 import { getRef } from './database.js';
 import { update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { getCurrentUser } from './auth.js';
 
 export async function checkAndDisplayExistingOcorrencias(telefone) {
     try {
@@ -355,11 +356,27 @@ async function handleSalvarHistoricoReiteracao(key, ocorrencia, alertDiv, telefo
     const atendimentoRef = getRef(`atendimentos/${key}`);
     const now = new Date();
 
+    const currentUser = getCurrentUser();
+    let usuarioNome = '';
+    let usuarioRE = '';
+    
+    if (currentUser) {
+        if (currentUser.tipo === 'MILITAR') {
+            usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
+            usuarioRE = currentUser.re || '';
+        } else {
+            usuarioNome = currentUser.nomeCompleto || '';
+            usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
+        }
+    }
+
     const reiteracao = {
         dataHora: now.toLocaleString('pt-BR'),
         tipo: complementOnly ? 'REITERAÇÃO COM COMPLEMENTO SIMPLES' : 'REITERAÇÃO COMPLETA',
         historicoAnterior: ocorrencia.historico,
-        historicoNovo: historicoAtualizado
+        historicoNovo: historicoAtualizado,
+        usuario: usuarioNome,
+        re: usuarioRE
     };
 
     const atendimentos = await getData('atendimentos');
