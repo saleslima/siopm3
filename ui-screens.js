@@ -28,6 +28,20 @@ export async function showUserDashboard(userData, allScreens) {
     } else {
         showScreen(document.getElementById('userDashboard'), allScreens);
     }
+
+    // When in atendente mode, change the attendance form submit button label to "Gerar Ocorrencia"
+    try {
+        const attendanceSaveBtn = document.querySelector('#attendanceForm .btn-cadastro[type="submit"]');
+        if (attendanceSaveBtn) {
+            if (userData.funcao && userData.funcao.includes('ATENDENTE')) {
+                attendanceSaveBtn.textContent = 'Gerar Ocorrencia';
+            } else {
+                attendanceSaveBtn.textContent = 'Salvar Atendimento';
+            }
+        }
+    } catch (e) {
+        // ignore if element missing
+    }
     
     document.getElementById('userLoginForm').reset();
     document.getElementById('userLoginMessage').style.display = 'none';

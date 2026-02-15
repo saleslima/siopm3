@@ -147,36 +147,8 @@ export async function loadDispatcherOcorrencias(btlNumber, dispatcherContent) {
                     const nowLocale = now.toLocaleString('pt-BR');
                     const nowTs = now.getTime();
 
-                    // If not observed, append a system observation and set opened timestamp
+                    // If not observed, set opened timestamp (only once) but DO NOT create a synthetic system observation.
                     if (!ocorrencia.observada) {
-                        // Build observation entry with current user info
-                        const currentUser = getCurrentUser();
-                        let usuarioNome = '';
-                        let usuarioRE = '';
-                        if (currentUser) {
-                            if (currentUser.tipo === 'MILITAR') {
-                                usuarioNome = currentUser.graduacao ? `${currentUser.graduacao} ${currentUser.nomeGuerra}` : currentUser.nomeGuerra;
-                                usuarioRE = currentUser.re || '';
-                            } else {
-                                usuarioNome = currentUser.nomeCompleto || '';
-                                usuarioRE = currentUser.cpf ? currentUser.cpf.replace(/\D/g, '') : '';
-                            }
-                        }
-
-                        const observacaoSistema = {
-                            dataHora: nowLocale,
-                            texto: 'OCORRÊNCIA OBSERVADA',
-                            usuario: usuarioNome,
-                            re: usuarioRE,
-                            sistema: true
-                        };
-
-                        const atendimentosAll = await getData('atendimentos');
-                        const ocorrAtual = atendimentosAll[key];
-                        const observacoesExistentes = ocorrAtual.observacoes || [];
-                        observacoesExistentes.push(observacaoSistema);
-
-                        updates.observacoes = observacoesExistentes;
                         updates.observada = true;
                         updates.abriuTimestamp = nowTs;
                         updates.abriuDataHora = nowLocale;

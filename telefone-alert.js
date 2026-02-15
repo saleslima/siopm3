@@ -13,7 +13,8 @@ import {
     renderImeis,
     getVeiculos,
     getPessoas,
-    getImeis
+    getImeis,
+    restoreFormFields
 } from './attendance.js';
 import { getRef } from './database.js';
 import { update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
@@ -76,7 +77,17 @@ export async function showMultipleOcorrenciasAlert(matchingOcorrencias) {
         }
     });
 
+    // If any matching previous occurrences were closed as TROTE, show a prominent TROTE warning with counts
+    const troteCount = matchingOcorrencias.filter(([k, o]) => o.statusFinal === 'TROTE' || (o.naturezaFinal && o.naturezaFinal.toUpperCase() === 'TROTE')).length;
+    const totalCalls = matchingOcorrencias.length;
+
     let html = '<p style="margin: 0 0 10px 0; font-size: 14px; font-weight: 600;">Ocorrências encontradas:</p>';
+
+    if (troteCount > 0) {
+        html = `<div style="background:#fff0f0;border:1px solid #f5c6cb;color:#b71c1c;padding:10px;border-radius:4px;margin-bottom:10px;font-weight:700;">
+                    AVISO: Histórico de TROTE detectado — últimas ${totalCalls} chamada(s), ${troteCount} fechada(s) como TROTE. Verifique antes de gerar nova ocorrência.
+                </div>` + html;
+    }
 
     for (const [key, ocorrencia] of matchingOcorrencias) {
         let statusText = '';

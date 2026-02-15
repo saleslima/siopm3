@@ -354,18 +354,20 @@ async function generateAdminPDF(startTimestamp, endTimestamp, statusFilter) {
     // Content
     filteredOcorrencias.forEach((ocorrencia, index) => {
         // Check if we need a new page
-        // Estimate height needed for one entry (approx 40-60 units depending on content)
-        if (yPosition > pageHeight - 40) {
+        if (yPosition > pageHeight - 60) {
             doc.addPage();
             yPosition = margin;
         }
 
-        // Status Label
+        // Status Label (include naturezaFinal and statusFinal if present)
         let statusText = 'PENDENTE/EM ANDAMENTO';
         if (ocorrencia.encerrado) {
             statusText = 'ENCERRADO';
             if (ocorrencia.resultado) statusText += ` - ${ocorrencia.resultado}`;
         }
+
+        const naturezaFinalText = ocorrencia.naturezaFinal ? `Natureza Final: ${ocorrencia.naturezaFinal}` : '';
+        const statusFinalText = ocorrencia.statusFinal ? `Status Final: ${ocorrencia.statusFinal}` : '';
 
         doc.setFontSize(11);
         doc.setFont(undefined, 'bold');
@@ -377,34 +379,49 @@ async function generateAdminPDF(startTimestamp, endTimestamp, statusFilter) {
         
         const details = [
             `Data/Hora: ${ocorrencia.dataHora}`,
-            `Natureza: ${ocorrencia.natureza} (${ocorrencia.gravidade})`,
+            `Natureza Inicial: ${ocorrencia.natureza} (${ocorrencia.gravidade})`,
+            naturezaFinalText,
+            statusFinalText,
             `Local: ${ocorrencia.rua}, ${ocorrencia.numero} - ${ocorrencia.bairro}, ${ocorrencia.municipio}`,
             `BTL: ${ocorrencia.btl}`,
             `Solicitante: ${ocorrencia.nome} (${ocorrencia.telefone})`,
-            `Histórico: ${ocorrencia.historico}`
+            `Histórico: ${ocorrencia.historico || 'N/A'}`
         ];
 
         if (ocorrencia.historicoFinal) {
             details.push(`Histórico Final: ${ocorrencia.historicoFinal}`);
         }
 
+        // Include observações if any
+        if (ocorrencia.observacoes && Array.isArray(ocorrencia.observacoes) && ocorrencia.observacoes.length > 0) {
+            details.push('Observações:');
+            ocorrencia.observacoes.forEach((obs, obsIndex) => {
+                const userInfo = obs.re && obs.usuario ? ` (RE: ${obs.re} - ${obs.usuario})` : '';
+                details.push(`  ${obsIndex + 1}. [${obs.dataHora}]${userInfo} ${obs.texto}`);
+            });
+        }
+
         details.forEach(detail => {
-            const splitText = doc.splitTextToSize(detail, pageWidth - (margin * 2));
+            const lines = doc.splitTextToSize(detail, pageWidth - (margin * 2));
             
-            // Check page break for lines
-            if (yPosition + (splitText.length * 4) > pageHeight - margin) {
+            // Page break check
+            if (yPosition + (lines.length * 4) > pageHeight - margin) {
                 doc.addPage();
                 yPosition = margin;
             }
 
-            doc.text(splitText, margin, yPosition);
-            yPosition += (splitText.length * 4) + 2;
+            doc.text(lines, margin, yPosition);
+            yPosition += (lines.length * 4) + 2;
         });
 
         yPosition += 4;
         
         // Separator between items
         if (index < filteredOcorrencias.length - 1) {
+            if (yPosition > pageHeight - 40) {
+                doc.addPage();
+                yPosition = margin;
+            }
             doc.setDrawColor(200);
             doc.setLineWidth(0.1);
             doc.line(margin, yPosition, pageWidth - margin, yPosition);

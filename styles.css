@@ -354,6 +354,28 @@ body {
     text-align: center;
     font-weight: 600;
     font-size: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Keep icon crisp while dimming label text */
+.vtr-disponivel-item .vtr-icon {
+    font-size: 18px;
+    opacity: 1;
+    line-height: 1;
+}
+
+/* dimmed class reduces label opacity but leaves icon unaffected */
+.vtr-disponivel-item.dimmed .vtr-label {
+    opacity: 0.4;
+}
+
+/* ensure when original code used inline opacity we fallback to label-only dim */
+.vtr-disponivel-item .vtr-label {
+    margin-left: 8px;
+    font-weight: 600;
+    opacity: 1;
 }
 
 .vtr-disponivel-item:hover {

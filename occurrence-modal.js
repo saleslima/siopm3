@@ -441,17 +441,28 @@ async function showObservarDialog(key, ocorrencia, modal) {
                 }
             }
 
+            const agora = new Date();
+            const agoraTs = agora.getTime();
+            const agoraLocale = agora.toLocaleString('pt-BR');
+
             observacoes.push({
-                dataHora: new Date().toLocaleString('pt-BR'),
+                dataHora: agoraLocale,
                 texto: texto,
                 usuario: usuarioNome,
                 re: usuarioRE
             });
 
-            await update(atendimentoRef, {
+            // Ensure opened timestamp exists (first-open) so observation includes both timestamps
+            const updatesPayload = {
                 observacoes: observacoes,
                 observada: true
-            });
+            };
+            if (!ocorrencia.abriuTimestamp) {
+                updatesPayload.abriuTimestamp = agoraTs;
+                updatesPayload.abriuDataHora = agoraLocale;
+            }
+
+            await update(atendimentoRef, updatesPayload);
 
             alert('Observação registrada com sucesso!');
             modal.style.display = 'none';

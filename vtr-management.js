@@ -37,33 +37,84 @@ export async function loadVTRPanels(btlNumber) {
 
         const vtrDisponiveisContent = document.getElementById('vtrDisponiveisContent');
         
-        // Add filter dropdown if not exists
+        // Instead of placing a filter/dropdown in the dispatcher header, expose a single "Status" button
+        // directly above the VTR list in the VTRs Disponíveis panel so users can open the status-options modal.
         const vtrPanelRight = document.getElementById('vtrDisponiveis');
-        let filterSelect = document.getElementById('vtrStatusFilter');
-        if (!filterSelect && vtrPanelRight) {
-            const filterContainer = document.createElement('div');
-            filterContainer.style.cssText = 'margin-bottom: 10px;';
-            filterContainer.innerHTML = `
-                <select id="vtrStatusFilter" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
-                    <option value="TODAS">Exibir Todas</option>
-                    <option value="DISPONIVEL">Somente Disponíveis</option>
-                </select>
-            `;
-            vtrPanelRight.insertBefore(filterContainer, vtrDisponiveisContent);
-            filterSelect = document.getElementById('vtrStatusFilter');
-            
-            filterSelect.addEventListener('change', async () => {
-                await loadVTRPanels(btlNumber);
+        let existingStatusBtn = document.getElementById('btnConfigVTRStatus');
+        if (!existingStatusBtn && vtrPanelRight) {
+            existingStatusBtn = document.createElement('button');
+            existingStatusBtn.id = 'btnConfigVTRStatus';
+            existingStatusBtn.className = 'btn-secondary';
+            existingStatusBtn.textContent = 'Status';
+            existingStatusBtn.style.cssText = 'display:block; width:100%; margin-bottom:10px; padding:10px; font-size:14px;';
+            vtrPanelRight.insertBefore(existingStatusBtn, vtrDisponiveisContent);
+
+            existingStatusBtn.addEventListener('click', () => {
+                // Build modal if not exists
+                let existing = document.getElementById('vtrStatusConfigModal');
+                if (existing) {
+                    existing.style.display = 'block';
+                    return;
+                }
+
+                const modal = document.createElement('div');
+                modal.id = 'vtrStatusConfigModal';
+                modal.className = 'modal';
+                modal.innerHTML = `
+                    <div class="modal-content" style="max-width:360px;">
+                        <span class="close" id="closeVtrStatusModal">&times;</span>
+                        <h3>Mostrar VTRs com status</h3>
+                        <div id="vtrStatusOptions" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+                            <label><input type="checkbox" value="DISPONIVEL"> DISPONÍVEL</label>
+                            <label><input type="checkbox" value="RONDA ESCOLAR"> RONDA ESCOLAR</label>
+                            <label><input type="checkbox" value="OPERACAO ESPECIAL"> OPERAÇÃO ESPECIAL</label>
+                            <label><input type="checkbox" value="ALIMENTACAO"> ALIMENTAÇÃO</label>
+                            <label><input type="checkbox" value="BAIXA MECANICA"> BAIXA MECÂNICA</label>
+                        </div>
+                        <div style="display:flex;gap:8px;margin-top:16px;">
+                            <button id="btnSaveVtrStatusConfig" class="btn-cadastro" style="flex:1;">Salvar</button>
+                            <button id="btnCancelVtrStatusConfig" class="btn-secondary" style="flex:1;">Cancelar</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+
+                const saved = JSON.parse(localStorage.getItem('vtrStatusFilterSet') || 'null');
+                const checkboxes = modal.querySelectorAll('#vtrStatusOptions input[type="checkbox"]');
+                if (saved && Array.isArray(saved)) {
+                    checkboxes.forEach(cb => cb.checked = saved.includes(cb.value));
+                } else {
+                    // default: show available and ronda escolar
+                    checkboxes.forEach(cb => {
+                        cb.checked = (cb.value === 'DISPONIVEL' || cb.value === 'RONDA ESCOLAR');
+                    });
+                }
+
+                // close handlers
+                modal.querySelector('#closeVtrStatusModal').addEventListener('click', () => modal.style.display = 'none');
+                modal.querySelector('#btnCancelVtrStatusConfig').addEventListener('click', () => modal.style.display = 'none');
+                modal.addEventListener('click', (ev) => { if (ev.target === modal) modal.style.display = 'none'; });
+
+                modal.querySelector('#btnSaveVtrStatusConfig').addEventListener('click', async () => {
+                    const selected = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
+                    localStorage.setItem('vtrStatusFilterSet', JSON.stringify(selected));
+                    modal.style.display = 'none';
+                    await loadVTRPanels(btlNumber);
+                });
+
+                modal.style.display = 'block';
             });
         }
         
-        const filterValue = filterSelect ? filterSelect.value : 'TODAS';
-        
-        let filteredVTRs = availableVTRs;
-        if (filterValue === 'DISPONIVEL') {
-            filteredVTRs = availableVTRs.filter(([key, vtr]) => vtr.status === 'DISPONIVEL');
-        }
-        
+        const savedSet = JSON.parse(localStorage.getItem('vtrStatusFilterSet') || 'null');
+        const allowedStatuses = Array.isArray(savedSet) && savedSet.length > 0 ? savedSet : ['DISPONIVEL', 'RONDA ESCOLAR'];
+
+        // Apply only the allowed statuses saved by the user (default: DISPONIVEL + RONDA ESCOLAR)
+        let filteredVTRs = availableVTRs.filter(([key, vtr]) => {
+            const status = (vtr.status || 'DISPONIVEL');
+            return allowedStatuses.includes(status);
+        });
+
         if (filteredVTRs.length === 0) {
             vtrDisponiveisContent.innerHTML = '<p class="no-vtrs">Nenhuma VTR disponível</p>';
         } else {
@@ -72,32 +123,33 @@ export async function loadVTRPanels(btlNumber) {
                 const status = vtr.status || 'DISPONIVEL';
                 const statusClass = `vtr-status-${status.toLowerCase().replace(/\s+/g, '-')}`;
                 const isAvailable = status === 'DISPONIVEL' || status === 'RONDA ESCOLAR';
-                const textOpacity = isAvailable ? '1' : '0.4';
+                const dimClass = isAvailable ? '' : 'dimmed';
                 
                 let icon = '';
                 switch(status) {
                     case 'DISPONIVEL':
-                        icon = '🫡 ';
+                        icon = '🫡';
                         break;
                     case 'RONDA ESCOLAR':
-                        icon = '📚 ';
+                        icon = '📚';
                         break;
                     case 'OPERACAO ESPECIAL':
-                        icon = '⚔️ ';
+                        icon = '⚔️';
                         break;
                     case 'ALIMENTACAO':
-                        icon = '🍴 ';
+                        icon = '🍴';
                         break;
                     case 'BAIXA MECANICA':
-                        icon = '👎 ';
+                        icon = '👎';
                         break;
                     default:
                         icon = '';
                 }
                 
                 html += `
-                    <div class="vtr-disponivel-item ${statusClass}" data-vtr="${vtr.vtrNumber}" data-vtr-key="${key}" style="opacity: ${textOpacity}; cursor: pointer; position: relative;">
-                        ${icon}${vtr.vtrNumber}
+                    <div class="vtr-disponivel-item ${statusClass} ${dimClass}" data-vtr="${vtr.vtrNumber}" data-vtr-key="${key}" style="cursor: pointer; position: relative;">
+                        <span class="vtr-icon">${icon}</span>
+                        <span class="vtr-label" style="margin-left:8px; font-weight:600;">${vtr.vtrNumber}</span>
                     </div>
                 `;
             });
