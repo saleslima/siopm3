@@ -447,15 +447,75 @@ numeroInput.addEventListener('blur', async () => {
     const bairro = bairroInput.value.trim();
     const municipio = document.getElementById('municipio').value.trim();
     const estado = document.getElementById('estado').value.trim();
-    
+    const cepVal = document.getElementById('cep').value.replace(/\D/g, '');
+
     // Check for existing occurrences (phone/duplicates alert)
     if (rua && numero && bairro) {
         await checkByAddress(rua, numero, bairro);
     }
 
-    // Try to detect BTL from address using GeoJSON files
-    if (rua && numero && municipio && estado) {
+    // If CEP present, prefer full detect flow
+    if (rua && numero && municipio && estado && cepVal && cepVal.length === 8) {
         await detectBTLFromAddress(rua, numero, municipio, estado);
+        return;
+    }
+
+    // If no CEP, but user provided rua + numero, attempt street suggestions via Nominatim
+    if (rua && numero && !cepVal) {
+        try {
+            // Try to fetch candidates and show suggestion list; if a user selects one,
+            // showRuaSuggestions handler will fill other fields and trigger BTL detection.
+            const candidates = await fetchStreetCandidates(rua + ' ' + numero, municipio, estado);
+            if (candidates && candidates.length > 0) {
+                showRuaSuggestions(candidates);
+                // also attempt a geocode to show map/coords and try detection by coordinates
+                const first = candidates[0];
+                if (first && first.lat && first.lon) {
+                    document.getElementById('btlCoordinates').textContent = `📍 Lat: ${parseFloat(first.lat).toFixed(6)}, Long: ${parseFloat(first.lon).toFixed(6)}`;
+                    // show iframe map for visual feedback
+                    const lat = parseFloat(first.lat), lon = parseFloat(first.lon);
+                    // reuse btl-detector's map update via global iframe approach
+                    const { updateMapWithIframe } = await import('./btl-detector.js').catch(()=>({}));
+                    if (updateMapWithIframe && typeof updateMapWithIframe === 'function') {
+                        updateMapWithIframe(lat, lon);
+                    } else {
+                        // fallback to direct iframe creation
+                        const mapDiv = document.getElementById('btlMap');
+                        if (mapDiv) {
+                            mapDiv.style.display = 'block';
+                            if (!document.getElementById('btlMapIframe')) {
+                                mapDiv.innerHTML = '';
+                                const iframe = document.createElement('iframe');
+                                iframe.width = '100%';
+                                iframe.height = '100%';
+                                iframe.style.border = '0';
+                                iframe.id = 'btlMapIframe';
+                                mapDiv.appendChild(iframe);
+                                const overlay = document.createElement('div');
+                                overlay.className = 'map-overlay-container';
+                                overlay.innerHTML = `<div class="map-marker-overlay"><div class="pin-icon"></div><div class="pin-pulse"></div></div>`;
+                                mapDiv.appendChild(overlay);
+                            }
+                            const iframe = document.getElementById('btlMapIframe');
+                            iframe.src = `https://www.google.com/maps/d/embed?mid=1IZQYhjM25zcrjnTEByfibpcDAE59r9o&ll=${lat},${lon}&z=14`;
+                        }
+                    }
+                    // try detection based on those coords (will fallback to historical if needed)
+                    await detectBTLFromAddress(rua, numero, municipio, estado);
+                }
+            } else {
+                // no candidates: fallback to geocode-based BTL detection
+                await detectBTLFromAddress(rua, numero, municipio, estado);
+            }
+        } catch (err) {
+            console.warn('Street suggestion/detect error', err);
+            await detectBTLFromAddress(rua, numero, municipio, estado);
+        }
+    } else {
+        // If some fields missing, attempt normal detection when enough info present
+        if (rua && numero && municipio && estado) {
+            await detectBTLFromAddress(rua, numero, municipio, estado);
+        }
     }
 });
 

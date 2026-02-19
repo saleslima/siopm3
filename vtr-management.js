@@ -7,12 +7,27 @@ export async function loadVTRPanels(btlNumber) {
         const vtrAssignments = await getData('vtrAssignments') || {};
         const atendimentos = await getData('atendimentos') || {};
 
-        const assignedVTRNumbers = new Set(Object.values(vtrAssignments).map(v => v.vtrNumber));
+        // Only consider VTRs as "assigned" if they have active (non-closed) occurrences
+        const assignedVTRNumbers = new Set();
+        Object.values(vtrAssignments).forEach(assignment => {
+            const ocorrencia = atendimentos[assignment.ocorrenciaId];
+            if (ocorrencia && !ocorrencia.encerrado) {
+                assignedVTRNumbers.add(assignment.vtrNumber);
+            }
+        });
 
-        let btlPrefix = btlNumber.substring(0, 2);
+        // Normalize to two-digit numeric prefix when possible (handles "1º BPM/M" -> "01")
+        function extractBtlPrefix(name) {
+            if (!name) return '';
+            const m = name.match(/^(\d{1,2})/);
+            if (m && m[1]) return String(m[1]).padStart(2, '0');
+            return name.substring(0, 2);
+        }
+
+        let btlPrefix = extractBtlPrefix(btlNumber);
 
         if (window.selectedBTL) {
-            btlPrefix = window.selectedBTL.substring(0, 2);
+            btlPrefix = extractBtlPrefix(window.selectedBTL);
         }
 
         const availableVTRs = Object.entries(vtrsDisponiveis)
@@ -175,7 +190,8 @@ export async function loadVTRPanels(btlNumber) {
         // Group assignments by VTR number so each VTR appears only once
         const empenhadasForBTL = Object.entries(vtrAssignments)
             .filter(([key, assignment]) => {
-                const vtrPrefix = assignment.vtrNumber.substring(0, 2);
+                const m = assignment.vtrNumber.match(/^(\d{1,2})/);
+                const vtrPrefix = m && m[1] ? String(m[1]).padStart(2, '0') : assignment.vtrNumber.substring(0,2);
                 return vtrPrefix === btlPrefix;
             });
 
@@ -184,7 +200,8 @@ export async function loadVTRPanels(btlNumber) {
             const vtrNum = assignment.vtrNumber;
             if (!groupedByVTR[vtrNum]) groupedByVTR[vtrNum] = [];
             const ocorrencia = atendimentos[assignment.ocorrenciaId];
-            if (ocorrencia) {
+            // Only include non-closed occurrences
+            if (ocorrencia && !ocorrencia.encerrado) {
                 groupedByVTR[vtrNum].push({
                     assignKey,
                     ocorrenciaKey: assignment.ocorrenciaId,
